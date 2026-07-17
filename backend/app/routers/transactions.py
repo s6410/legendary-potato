@@ -98,8 +98,9 @@ def list_transactions(
         select(Transaction), db, date_from, date_to, account_id, category_id,
         q, uncategorized, min_amount, max_amount,
     )
-    total = db.scalar(select(func.count()).select_from(base.subquery()))
-    total_amount = db.scalar(select(func.coalesce(func.sum(Transaction.amount_ore), 0)).select_from(base.subquery()))
+    sub = base.subquery()
+    total = db.scalar(select(func.count()).select_from(sub))
+    total_amount = db.scalar(select(func.coalesce(func.sum(sub.c.amount_ore), 0)))
     order = {
         "date_desc": (Transaction.booked_date.desc(), Transaction.id.desc()),
         "date_asc": (Transaction.booked_date.asc(), Transaction.id.asc()),
