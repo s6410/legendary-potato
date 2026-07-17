@@ -10,6 +10,13 @@ export default defineConfig({
     },
   },
   build: {
-    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ['echarts'],
+          vendor: ['react', 'react-dom', 'react-router-dom', '@tanstack/react-query'],
+        },
+      },
+    },
   },
 })
