@@ -1,5 +1,5 @@
 import type { ECElementEvent, EChartsOption } from 'echarts'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import {
@@ -25,6 +25,16 @@ export function OverviewPage() {
   const navigate = useNavigate()
 
   const { data: anyTxns, isLoading: checkingEmpty } = useTransactions({ page_size: 1 })
+
+  // hoppa till senaste månaden med data om innevarande månad är tom (och
+  // användaren inte själv har bläddrat)
+  const touched = useRef(false)
+  useEffect(() => {
+    const latest = anyTxns?.rows[0]?.booked_date.slice(0, 7)
+    if (!touched.current && latest && latest < currentMonth()) {
+      setMonth(latest)
+    }
+  }, [anyTxns])
   const { data: summary } = useSummary({ period: month })
   const { data: rootBuckets = [] } = useByCategory({ period: month })
   const { data: drillBuckets = [] } = useByCategory(
@@ -69,7 +79,14 @@ export function OverviewPage() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Översikt</h1>
-        <PeriodPicker month={month} onChange={(m) => { setMonth(m); setDrill(null) }} />
+        <PeriodPicker
+          month={month}
+          onChange={(m) => {
+            touched.current = true
+            setMonth(m)
+            setDrill(null)
+          }}
+        />
       </div>
 
       {suggestions.length > 0 && (
@@ -241,7 +258,8 @@ function treemapOption(buckets: CategoryBucket[], t: Tokens): EChartsOption {
       borderColor: t.grid,
       textStyle: { color: t.ink, fontSize: 12 },
       formatter: (p) => {
-        const d = (p as unknown as { data: { bucket: CategoryBucket } }).data.bucket
+        const d = (p as unknown as { data?: { bucket?: CategoryBucket } }).data?.bucket
+        if (!d) return ''
         const share = total ? Math.round((Math.abs(d.amount_ore) / total) * 100) : 0
         return `<b>${d.name}</b><br/>${formatOre(Math.abs(d.amount_ore))} · ${share} % · ${d.transaction_count} transaktioner`
       },
@@ -257,8 +275,8 @@ function treemapOption(buckets: CategoryBucket[], t: Tokens): EChartsOption {
           color: '#ffffff',
           fontSize: 12,
           formatter: (p) => {
-            const d = (p as unknown as { data: { bucket: CategoryBucket } }).data.bucket
-            return `${d.name}\n${formatOre(Math.abs(d.amount_ore))}`
+            const d = (p as unknown as { data?: { bucket?: CategoryBucket } }).data?.bucket
+            return d ? `${d.name}\n${formatOre(Math.abs(d.amount_ore))}` : ''
           },
         },
         data: buckets.map((b, i) => ({
