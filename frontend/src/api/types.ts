@@ -1,0 +1,288 @@
+// Typer som speglar backend-API:ts svar.
+
+export interface Account {
+  id: number
+  name: string
+  kind: string
+  currency: string
+  is_active: boolean
+  transaction_count: number
+}
+
+export interface Category {
+  id: number
+  name: string
+  kind: string
+  color: string | null
+  icon: string | null
+  sort_order: number
+  transaction_count: number
+  rule_count: number
+  children: Category[]
+}
+
+export interface TxnLinkInfo {
+  link_id: number
+  kind: 'refund' | 'transfer'
+  status: 'suggested' | 'confirmed'
+}
+
+export interface Txn {
+  id: number
+  booked_date: string
+  amount_ore: number
+  description: string
+  description_norm: string
+  account_id: number
+  account_name: string | null
+  category_id: number | null
+  category_path: string | null
+  category_source: 'rule' | 'manual' | null
+  is_excluded: boolean
+  note: string | null
+  link: TxnLinkInfo | null
+}
+
+export interface TxnPage {
+  total: number
+  total_amount_ore: number
+  page: number
+  page_size: number
+  rows: Txn[]
+}
+
+export interface Inspection {
+  file_type: string
+  encoding: string | null
+  delimiter: string | null
+  header_row_index: number
+  header: string[]
+  sample_rows: string[][]
+  fingerprint: string
+  suggested_mapping: Record<string, number | null>
+  suggested_date_format: string
+  suggested_decimal_separator: string
+  suggested_thousands_separator: string | null
+  suggested_invert_sign: boolean
+}
+
+export interface ImportProfile {
+  id: number
+  fingerprint: string
+  name: string
+  default_account_id: number | null
+  file_type: string
+  delimiter: string | null
+  encoding: string | null
+  decimal_separator: string
+  thousands_separator: string | null
+  date_format: string
+  header_row_index: number
+  invert_sign: boolean
+  skip_value: string | null
+  column_mapping: Record<string, number | null>
+}
+
+export interface InspectResult {
+  known: boolean
+  profile: ImportProfile | null
+  inspection: Inspection
+}
+
+export interface PreviewRow {
+  booked_date: string
+  amount_ore: number
+  description: string
+  duplicate: boolean
+  category_id: number | null
+  category_name: string | null
+}
+
+export interface ImportPreview {
+  account_id: number
+  profile_name: string
+  total: number
+  new_count: number
+  duplicate_count: number
+  auto_categorized: number
+  skipped: { row_index: number; reason: string; cells: string[] }[]
+  identical_file_already_imported: boolean
+  rows: PreviewRow[]
+}
+
+export interface ImportBatch {
+  id: number
+  account_id: number
+  account_name: string | null
+  profile_name: string | null
+  filename: string | null
+  imported_at: string
+  row_count: number
+  inserted_count: number
+  duplicate_count: number
+  status: 'committed' | 'reverted'
+}
+
+export interface Rule {
+  id: number
+  match_type: 'exact' | 'prefix' | 'contains'
+  pattern: string
+  category_id: number
+  category_path: string | null
+  account_id: number | null
+  account_name: string | null
+  priority: number
+  hit_count: number
+  updated_at: string
+}
+
+export interface LinkTxn {
+  id: number
+  booked_date: string
+  amount_ore: number
+  description: string
+  account_name: string | null
+}
+
+export interface LinkSuggestion {
+  id: number
+  kind: 'refund' | 'transfer'
+  score: number | null
+  txn_a: LinkTxn
+  txn_b: LinkTxn
+}
+
+export interface SummaryNumbers {
+  income_ore: number
+  expenses_ore: number
+  net_ore: number
+  savings_rate: number | null
+  transaction_count: number
+}
+
+export interface Summary {
+  from: string
+  to: string
+  current: SummaryNumbers
+  previous: SummaryNumbers | null
+}
+
+export interface CategoryBucket {
+  category_id: number | null
+  name: string
+  color: string | null
+  kind: string
+  amount_ore: number
+  transaction_count: number
+}
+
+export interface TrendPoint extends SummaryNumbers {
+  month: string
+  cumulative_ore?: number
+}
+
+export interface Merchant {
+  merchant: string
+  description_norm: string
+  amount_ore: number
+  transaction_count: number
+}
+
+export interface RecurringSeries {
+  description_norm: string
+  display_name: string
+  account_id: number
+  cadence: string
+  cadence_label: string
+  occurrences: number
+  median_amount_ore: number
+  variable_amount: boolean
+  annual_cost_ore: number
+  last_date: string
+  next_expected_date: string
+  possibly_ended: boolean
+  category_id: number | null
+  category_path: string | null
+  confirmed: boolean
+}
+
+export interface BudgetItem {
+  budget_id: number
+  category_id: number
+  category_path: string
+  color: string | null
+  budget_ore: number
+  spent_ore: number
+  remaining_ore: number
+  progress: number | null
+  valid_from: string
+}
+
+export interface SavingsAccount {
+  id: number
+  name: string
+  asset_class: string
+  asset_class_label: string
+  is_active: boolean
+  sort_order: number
+  latest_date: string | null
+  latest_value_ore: number | null
+}
+
+export interface SavingsHistory {
+  dates: string[]
+  series: {
+    savings_account_id: number
+    name: string
+    asset_class: string
+    values: (number | null)[]
+    snapshots: { id: number; date: string; value_ore: number }[]
+  }[]
+}
+
+export interface DriftClass {
+  asset_class: string
+  label: string
+  value_ore: number
+  current_pct: number
+  target_pct: number | null
+  drift_pct: number | null
+  drift_ore: number | null
+}
+
+export interface Drift {
+  total_ore: number
+  classes: DriftClass[]
+}
+
+export interface Target {
+  asset_class: string
+  label: string
+  target_pct: number
+}
+
+export interface Forecast {
+  based_on_months: string[]
+  months: string[]
+  categories: { category_id: number | null; name: string; projected_monthly_ore: number }[]
+  projected_total_monthly_ore: number
+}
+
+export interface MonthlyReport {
+  month: string
+  summary: SummaryNumbers
+  previous_summary: SummaryNumbers
+  by_category: CategoryBucket[]
+  top_merchants: Merchant[]
+  largest_expenses: {
+    id: number
+    booked_date: string
+    amount_ore: number
+    description: string
+    account_name: string | null
+    category_path: string | null
+  }[]
+  budget: BudgetItem[]
+  upcoming_recurring: RecurringSeries[]
+  trend: TrendPoint[]
+}
