@@ -130,10 +130,14 @@ export const useByMember = (params: Record<string, unknown>) =>
 export const useMembers = () =>
   useQuery({ queryKey: ['members'], queryFn: () => get<string[]>('/transactions/members') })
 
-export const useRebalance = (contributionOre: number) =>
+export const useRebalance = (contributionOre: number, accountId?: number) =>
   useQuery({
-    queryKey: ['rebalance', contributionOre],
-    queryFn: () => get<RebalancePlan>('/savings/rebalance', { contribution_ore: contributionOre }),
+    queryKey: ['rebalance', contributionOre, accountId ?? null],
+    queryFn: () =>
+      get<RebalancePlan>('/savings/rebalance', {
+        contribution_ore: contributionOre,
+        ...(accountId != null ? { account_id: accountId } : {}),
+      }),
   })
 
 export const useYearlyReport = (year: number) =>

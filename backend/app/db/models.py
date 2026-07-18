@@ -122,6 +122,8 @@ class SavingsAccount(Base):
     asset_class: Mapped[str] = mapped_column(default="other")
     is_active: Mapped[int] = mapped_column(default=1)
     sort_order: Mapped[int] = mapped_column(default=0)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("savings_accounts.id"))
+    target_pct: Mapped[float | None]
     created_at: Mapped[str] = mapped_column(default=now_iso)
 
 

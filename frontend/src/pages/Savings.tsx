@@ -10,7 +10,7 @@ import {
   useSavingsHistory,
   useTargets,
 } from '../api/hooks'
-import type { DriftClass, SavingsAccount } from '../api/types'
+import type { Drift, DriftAccountSection, SavingsAccount } from '../api/types'
 import { EChart } from '../components/EChart'
 import { Modal } from '../components/Modal'
 import { formatDate, formatOre, formatSigned, parseKr } from '../lib/format'
@@ -39,7 +39,11 @@ export function SavingsPage() {
 
   const [entering, setEntering] = useState(false)
   const [addingAccount, setAddingAccount] = useState(false)
+  const [addingHoldingTo, setAddingHoldingTo] = useState<SavingsAccount | null>(null)
   const [editingTargets, setEditingTargets] = useState(false)
+
+  const topLevel = accounts.filter((a) => a.parent_id == null)
+  const holdingsOf = (id: number) => accounts.filter((a) => a.parent_id === id)
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -95,8 +99,13 @@ export function SavingsPage() {
               <h2 className="mb-2 font-semibold">Konton</h2>
               <table className="w-full text-sm">
                 <tbody>
-                  {accounts.map((a) => (
-                    <AccountRow key={a.id} account={a} />
+                  {topLevel.map((a) => (
+                    <AccountGroup
+                      key={a.id}
+                      account={a}
+                      holdings={holdingsOf(a.id)}
+                      onAddHolding={() => setAddingHoldingTo(a)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -113,7 +122,17 @@ export function SavingsPage() {
                 </button>
               </div>
               {drift && drift.total_ore > 0 ? (
-                <DriftView drift={drift.classes} tokens={tokens} />
+                <DriftView
+                  rows={drift.classes.map((c) => ({
+                    key: c.asset_class,
+                    label: c.label,
+                    color: tokens.series[CLASS_COLOR_INDEX[c.asset_class] ?? 6],
+                    current_pct: c.current_pct,
+                    target_pct: c.target_pct,
+                    drift_pct: c.drift_pct,
+                    drift_ore: c.drift_ore,
+                  }))}
+                />
               ) : (
                 <p className="py-8 text-center text-sm text-muted">
                   Mata in värden så visas fördelningen här.
@@ -122,7 +141,11 @@ export function SavingsPage() {
             </div>
           </div>
 
-          {drift && drift.total_ore > 0 && <RebalanceCard />}
+          {drift && drift.accounts.length > 0 && drift.total_ore > 0 && (
+            <HoldingsDriftCard sections={drift.accounts} tokens={tokens} />
+          )}
+
+          {drift && drift.total_ore > 0 && <RebalanceCard drift={drift} />}
 
           {history && history.dates.length > 1 && (
             <div className="card mt-5 p-4">
@@ -135,29 +158,86 @@ export function SavingsPage() {
 
       {entering && <SnapshotDialog accounts={accounts} onClose={() => setEntering(false)} />}
       {addingAccount && <AddAccountDialog onClose={() => setAddingAccount(false)} />}
+      {addingHoldingTo && (
+        <AddHoldingDialog parent={addingHoldingTo} onClose={() => setAddingHoldingTo(null)} />
+      )}
       {editingTargets && <TargetsDialog onClose={() => setEditingTargets(false)} />}
     </div>
   )
 }
 
-function AccountRow({ account }: { account: SavingsAccount }) {
+function AccountGroup({
+  account,
+  holdings,
+  onAddHolding,
+}: {
+  account: SavingsAccount
+  holdings: SavingsAccount[]
+  onAddHolding: () => void
+}) {
+  const remove = useApiMutation((id: number) => api.send('DELETE', `/savings/accounts/${id}`))
+  const confirmText =
+    holdings.length > 0
+      ? `Ta bort ${account.name} med ${holdings.length} innehav och all historik?`
+      : `Ta bort ${account.name} och all dess historik?`
+  return (
+    <>
+      <tr className="border-b border-bord/50 last:border-0">
+        <td className="py-2">
+          <div className="font-medium">{account.name}</div>
+          <div className="text-xs text-muted">
+            {holdings.length > 0 ? `${holdings.length} innehav` : account.asset_class_label}
+            {' · '}
+            <button onClick={onAddHolding} className="text-accent hover:underline">
+              + innehav
+            </button>
+          </div>
+        </td>
+        <td className="py-2 text-right align-top">
+          <div className="tabular font-medium">{formatOre(account.latest_value_ore)}</div>
+          {account.latest_date && (
+            <div className="text-xs text-muted">per {formatDate(account.latest_date)}</div>
+          )}
+        </td>
+        <td className="w-8 py-2 text-right align-top">
+          <button
+            onClick={() => {
+              if (confirm(confirmText)) remove.mutate(account.id)
+            }}
+            className="text-xs text-muted hover:text-bad"
+            title="Ta bort"
+          >
+            ✕
+          </button>
+        </td>
+      </tr>
+      {holdings.map((h) => (
+        <HoldingRow key={h.id} holding={h} />
+      ))}
+    </>
+  )
+}
+
+function HoldingRow({ holding }: { holding: SavingsAccount }) {
   const remove = useApiMutation((id: number) => api.send('DELETE', `/savings/accounts/${id}`))
   return (
     <tr className="border-b border-bord/50 last:border-0">
-      <td className="py-2">
-        <div className="font-medium">{account.name}</div>
-        <div className="text-xs text-muted">{account.asset_class_label}</div>
+      <td className="py-1.5 pl-5">
+        <div className="text-sm">{holding.name}</div>
+        <div className="text-xs text-muted">
+          {holding.asset_class_label}
+          {holding.target_pct != null &&
+            ` · mål ${String(holding.target_pct).replace('.', ',')} %`}
+        </div>
       </td>
-      <td className="py-2 text-right">
-        <div className="tabular font-medium">{formatOre(account.latest_value_ore)}</div>
-        {account.latest_date && (
-          <div className="text-xs text-muted">per {formatDate(account.latest_date)}</div>
-        )}
+      <td className="py-1.5 text-right align-top">
+        <div className="tabular text-sm">{formatOre(holding.latest_value_ore)}</div>
       </td>
-      <td className="w-8 py-2 text-right">
+      <td className="w-8 py-1.5 text-right align-top">
         <button
           onClick={() => {
-            if (confirm(`Ta bort ${account.name} och all dess historik?`)) remove.mutate(account.id)
+            if (confirm(`Ta bort innehavet ${holding.name} och dess historik?`))
+              remove.mutate(holding.id)
           }}
           className="text-xs text-muted hover:text-bad"
           title="Ta bort"
@@ -169,57 +249,189 @@ function AccountRow({ account }: { account: SavingsAccount }) {
   )
 }
 
-function DriftView({ drift, tokens }: { drift: DriftClass[]; tokens: ReturnType<typeof chartTokens> }) {
+interface DriftRow {
+  key: string | number
+  label: string
+  color: string
+  current_pct: number
+  target_pct: number | null
+  drift_pct: number | null
+  drift_ore: number | null
+}
+
+function DriftView({ rows }: { rows: DriftRow[] }) {
   return (
     <div className="flex flex-col gap-3">
-      {drift.map((c) => {
-        const color = tokens.series[CLASS_COLOR_INDEX[c.asset_class] ?? 6]
-        return (
-          <div key={c.asset_class}>
-            <div className="flex items-center justify-between text-sm">
-              <span className="flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden />
-                {c.label}
-              </span>
-              <span className="tabular text-ink-2">
-                {String(c.current_pct).replace('.', ',')} %
-                {c.target_pct != null && <span className="text-muted"> / mål {String(c.target_pct).replace('.', ',')} %</span>}
-              </span>
-            </div>
-            <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-grid">
+      {rows.map((c) => (
+        <div key={c.key}>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} aria-hidden />
+              {c.label}
+            </span>
+            <span className="tabular text-ink-2">
+              {String(c.current_pct).replace('.', ',')} %
+              {c.target_pct != null && <span className="text-muted"> / mål {String(c.target_pct).replace('.', ',')} %</span>}
+            </span>
+          </div>
+          <div className="relative mt-1.5 h-2.5 overflow-hidden rounded-full bg-grid">
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${Math.min(100, c.current_pct)}%`, background: c.color }}
+            />
+            {c.target_pct != null && (
               <div
-                className="h-full rounded-full"
-                style={{ width: `${Math.min(100, c.current_pct)}%`, background: color }}
+                className="absolute top-0 h-full w-0.5 bg-ink"
+                style={{ left: `${Math.min(100, c.target_pct)}%` }}
+                title={`Mål ${c.target_pct} %`}
               />
-              {c.target_pct != null && (
-                <div
-                  className="absolute top-0 h-full w-0.5 bg-ink"
-                  style={{ left: `${Math.min(100, c.target_pct)}%` }}
-                  title={`Mål ${c.target_pct} %`}
-                />
-              )}
-            </div>
-            {c.drift_ore != null && Math.abs(c.drift_pct ?? 0) >= 1 && (
-              <div className={`mt-1 text-xs ${Math.abs(c.drift_pct ?? 0) >= 5 ? 'text-bad' : 'text-muted'}`}>
-                {c.drift_ore > 0 ? 'Övervikt' : 'Undervikt'} {formatOre(Math.abs(c.drift_ore))} (
-                {String(Math.abs(c.drift_pct ?? 0)).replace('.', ',')} procentenheter)
-              </div>
             )}
           </div>
-        )
-      })}
+          {c.drift_ore != null && Math.abs(c.drift_pct ?? 0) >= 1 && (
+            <div className={`mt-1 text-xs ${Math.abs(c.drift_pct ?? 0) >= 5 ? 'text-bad' : 'text-muted'}`}>
+              {c.drift_ore > 0 ? 'Övervikt' : 'Undervikt'} {formatOre(Math.abs(c.drift_ore))} (
+              {String(Math.abs(c.drift_pct ?? 0)).replace('.', ',')} procentenheter)
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
 
-function RebalanceCard() {
+function HoldingsDriftCard({
+  sections,
+  tokens,
+}: {
+  sections: DriftAccountSection[]
+  tokens: ReturnType<typeof chartTokens>
+}) {
+  const [editing, setEditing] = useState<DriftAccountSection | null>(null)
+  return (
+    <div className="card mt-5 p-5">
+      <h2 className="font-semibold">Fördelning inom konton</h2>
+      <div className="mt-3 grid gap-6 lg:grid-cols-2">
+        {sections.map((s) => (
+          <div key={s.id}>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-medium">
+                {s.name} <span className="text-muted">· {formatOre(s.total_ore)}</span>
+              </span>
+              <button
+                onClick={() => setEditing(s)}
+                className="text-sm text-accent hover:underline"
+              >
+                Ändra mål
+              </button>
+            </div>
+            {s.total_ore > 0 ? (
+              <DriftView
+                rows={s.holdings.map((h, i) => ({
+                  key: h.id,
+                  label: h.name,
+                  color: tokens.series[i % tokens.series.length],
+                  current_pct: h.current_pct,
+                  target_pct: h.target_pct,
+                  drift_pct: h.drift_pct,
+                  drift_ore: h.drift_ore,
+                }))}
+              />
+            ) : (
+              <p className="text-sm text-muted">Mata in värden på innehaven så visas driften.</p>
+            )}
+          </div>
+        ))}
+      </div>
+      {editing && <HoldingTargetsDialog section={editing} onClose={() => setEditing(null)} />}
+    </div>
+  )
+}
+
+function HoldingTargetsDialog({
+  section,
+  onClose,
+}: {
+  section: DriftAccountSection
+  onClose: () => void
+}) {
+  const [values, setValues] = useState<Record<number, string>>(() =>
+    Object.fromEntries(section.holdings.map((h) => [h.id, String(h.target_pct ?? 0)])),
+  )
+  const total = Object.values(values).reduce((s, v) => s + (parseFloat(v.replace(',', '.')) || 0), 0)
+  const mutation = useApiMutation(
+    () =>
+      api.send('PUT', `/savings/accounts/${section.id}/targets`, {
+        targets: section.holdings.map((h) => ({
+          id: h.id,
+          target_pct: parseFloat((values[h.id] ?? '0').replace(',', '.')) || 0,
+        })),
+      }),
+    onClose,
+  )
+  return (
+    <Modal title={`Målfördelning — ${section.name}`} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-sm">
+        {section.holdings.map((h) => (
+          <label key={h.id} className="flex items-center justify-between gap-3">
+            <span>{h.name}</span>
+            <span className="flex items-center gap-1">
+              <input
+                inputMode="decimal"
+                className="w-20 text-right"
+                value={values[h.id] ?? '0'}
+                onChange={(e) => setValues((v) => ({ ...v, [h.id]: e.target.value }))}
+              />
+              %
+            </span>
+          </label>
+        ))}
+        <div className={`text-right text-xs ${Math.abs(total - 100) > 1 ? 'text-bad' : 'text-muted'}`}>
+          Summa: {String(Math.round(total * 10) / 10).replace('.', ',')} % (ska bli 100 %)
+        </div>
+        {mutation.isError && <span className="text-bad">{(mutation.error as Error).message}</span>}
+        <div className="mt-2 flex justify-end gap-3">
+          <button onClick={onClose} className="rounded-lg border border-baseline px-4 py-2 hover:bg-grid">
+            Avbryt
+          </button>
+          <button
+            disabled={mutation.isPending || Math.abs(total - 100) > 1}
+            onClick={() => mutation.mutate(undefined)}
+            className="rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Spara
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function RebalanceCard({ drift }: { drift: Drift }) {
   const [amountText, setAmountText] = useState('5000')
+  const [scope, setScope] = useState<'classes' | number>('classes')
   const contribution = parseKr(amountText) ?? 0
-  const { data: plan } = useRebalance(contribution)
+  const { data: plan } = useRebalance(contribution, scope === 'classes' ? undefined : scope)
 
   return (
     <div className="card mt-5 p-5">
-      <h2 className="font-semibold">Rebalanseringsförslag</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">Rebalanseringsförslag</h2>
+        {drift.accounts.length > 0 && (
+          <select
+            value={String(scope)}
+            onChange={(e) => setScope(e.target.value === 'classes' ? 'classes' : Number(e.target.value))}
+            className="text-sm"
+            aria-label="Rebalansera inom"
+          >
+            <option value="classes">Hela sparandet (tillgångsslag)</option>
+            {drift.accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} (innehav)
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
         <span>Om jag sätter in</span>
         <input
@@ -235,7 +447,7 @@ function RebalanceCard() {
         <>
           <ul className="mt-3 flex flex-col gap-1.5 text-sm">
             {plan.allocations.map((a) => (
-              <li key={a.asset_class} className="flex justify-between">
+              <li key={a.asset_class ?? a.id} className="flex justify-between">
                 <span>{a.label}</span>
                 <span className="tabular font-medium">
                   {plan.requires_selling ? formatSigned(a.amount_ore) : formatOre(a.amount_ore)}
@@ -246,7 +458,9 @@ function RebalanceCard() {
           <p className="mt-2 text-xs text-muted">
             {plan.requires_selling
               ? 'Utan nysparande krävs omflyttning (positivt = köp, negativt = sälj).'
-              : 'Fördelningen fyller underviktade tillgångsslag först, utan att något behöver säljas.'}
+              : scope === 'classes'
+                ? 'Fördelningen fyller underviktade tillgångsslag först, utan att något behöver säljas.'
+                : 'Fördelningen fyller underviktade innehav först, utan att något behöver säljas.'}
           </p>
         </>
       ) : (
@@ -305,16 +519,22 @@ function historyOption(
 
 function SnapshotDialog({ accounts, onClose }: { accounts: SavingsAccount[]; onClose: () => void }) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  // värden anges bara på lövnivå: innehav och konton utan innehav, i kontoordning
+  const leaves = accounts
+    .filter((a) => a.parent_id == null)
+    .flatMap((a) => (a.has_holdings ? accounts.filter((h) => h.parent_id === a.id) : [a]))
+  const parentName = (a: SavingsAccount) =>
+    a.parent_id != null ? accounts.find((p) => p.id === a.parent_id)?.name : null
   const [values, setValues] = useState<Record<number, string>>(() =>
     Object.fromEntries(
-      accounts.map((a) => [a.id, a.latest_value_ore != null ? String(a.latest_value_ore / 100) : '']),
+      leaves.map((a) => [a.id, a.latest_value_ore != null ? String(a.latest_value_ore / 100) : '']),
     ),
   )
   const mutation = useApiMutation(
     () =>
       api.send('POST', '/savings/snapshots', {
         snapshot_date: date,
-        values: accounts
+        values: leaves
           .filter((a) => parseKr(values[a.id] ?? '') != null)
           .map((a) => ({
             savings_account_id: a.id,
@@ -330,9 +550,10 @@ function SnapshotDialog({ accounts, onClose }: { accounts: SavingsAccount[]; onC
           <span className="font-medium">Datum</span>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
-        {accounts.map((a) => (
+        {leaves.map((a) => (
           <label key={a.id} className="flex items-center justify-between gap-3">
             <span>
+              {parentName(a) && <span className="text-xs text-muted">{parentName(a)} · </span>}
               {a.name} <span className="text-xs text-muted">({a.asset_class_label})</span>
             </span>
             <input
@@ -385,6 +606,73 @@ function AddAccountDialog({ onClose }: { onClose: () => void }) {
               </option>
             ))}
           </select>
+        </label>
+        {mutation.isError && <span className="text-bad">{(mutation.error as Error).message}</span>}
+        <div className="mt-2 flex justify-end gap-3">
+          <button onClick={onClose} className="rounded-lg border border-baseline px-4 py-2 hover:bg-grid">
+            Avbryt
+          </button>
+          <button
+            disabled={!name.trim() || mutation.isPending}
+            onClick={() => mutation.mutate(undefined)}
+            className="rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Skapa
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function AddHoldingDialog({ parent, onClose }: { parent: SavingsAccount; onClose: () => void }) {
+  const [name, setName] = useState('')
+  const [assetClass, setAssetClass] = useState('equity')
+  const [targetText, setTargetText] = useState('')
+  const mutation = useApiMutation(
+    () =>
+      api.send('POST', '/savings/accounts', {
+        name: name.trim(),
+        asset_class: assetClass,
+        parent_id: parent.id,
+        target_pct: targetText.trim() ? parseFloat(targetText.replace(',', '.')) : null,
+      }),
+    onClose,
+  )
+  return (
+    <Modal title={`Nytt innehav i ${parent.name}`} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="font-medium">Namn</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="t.ex. LF Global Indexnära"
+            autoFocus
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium">Tillgångsslag</span>
+          <select value={assetClass} onChange={(e) => setAssetClass(e.target.value)}>
+            {CLASS_OPTIONS.map(([k, label]) => (
+              <option key={k} value={k}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="font-medium">Målandel inom kontot (%)</span>
+          <input
+            inputMode="decimal"
+            value={targetText}
+            onChange={(e) => setTargetText(e.target.value)}
+            placeholder="t.ex. 82"
+          />
+          <span className="text-xs text-muted">
+            Kan lämnas tomt och sättas senare via "Ändra mål". Alla innehavs mål ska summera
+            till 100 %.
+          </span>
         </label>
         {mutation.isError && <span className="text-bad">{(mutation.error as Error).message}</span>}
         <div className="mt-2 flex justify-end gap-3">

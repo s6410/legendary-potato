@@ -30,7 +30,9 @@ All data lagras lokalt i en SQLite-databas på din dator. Ingenting lämnar din 
 - **Budget & prognos**: månadsbudget per kategori med utfall, plus riktvärden baserade på
   vad kategorierna faktiskt brukar kosta.
 - **Sparande med driftkoll**: uppdatera konto-/depåvärden manuellt, följ utvecklingen och
-  se drift mot din målfördelning i både procentenheter och kronor.
+  se drift mot din målfördelning i både procentenheter och kronor — både per tillgångsslag
+  över hela sparandet och mellan innehaven (t.ex. fonder med mål 82 %/18 %) inom varje
+  ISK/konto, med rebalanseringsförslag per konto.
 - **Månadsrapport** (utskriftsvänlig), global sök/filter, CSV-export, mörkt/ljust tema.
 
 ## Kom igång

@@ -226,6 +226,9 @@ export interface SavingsAccount {
   asset_class_label: string
   is_active: boolean
   sort_order: number
+  parent_id: number | null
+  target_pct: number | null
+  has_holdings: boolean
   latest_date: string | null
   latest_value_ore: number | null
 }
@@ -251,9 +254,28 @@ export interface DriftClass {
   drift_ore: number | null
 }
 
+export interface DriftHolding {
+  id: number
+  name: string
+  value_ore: number
+  current_pct: number
+  target_pct: number | null
+  drift_pct: number | null
+  drift_ore: number | null
+}
+
+export interface DriftAccountSection {
+  id: number
+  name: string
+  total_ore: number
+  holdings: DriftHolding[]
+}
+
 export interface Drift {
   total_ore: number
   classes: DriftClass[]
+  by_account: { id: number; name: string; value_ore: number; share_pct: number }[]
+  accounts: DriftAccountSection[]
 }
 
 export interface Target {
@@ -313,7 +335,7 @@ export interface ByMember {
 
 export interface RebalancePlan {
   contribution_ore: number
-  allocations: { asset_class: string; label: string; amount_ore: number }[]
+  allocations: { asset_class?: string; id?: number; label: string; amount_ore: number }[]
   requires_selling?: boolean
 }
 
