@@ -235,6 +235,7 @@ export interface SavingsAccount {
 
 export interface SavingsHistory {
   dates: string[]
+  invested: (number | null)[]
   series: {
     savings_account_id: number
     name: string
@@ -282,6 +283,36 @@ export interface Target {
   asset_class: string
   label: string
   target_pct: number
+}
+
+export interface SavingsPlanAccount {
+  id: number
+  name: string
+  monthly_amount_ore: number
+  start_date: string
+  invested_ore: number
+  current_value_ore: number
+  return_ore: number
+  return_pct: number
+}
+
+export interface SavingsPlanTotal {
+  invested_ore: number
+  current_value_ore: number
+  return_ore: number
+  return_pct: number
+  monthly_amount_ore: number
+}
+
+export interface SavingsPlanSummary {
+  accounts: SavingsPlanAccount[]
+  total: SavingsPlanTotal | null
+  forecast: { rate_pct: number; points: { year: number; value_ore: number }[] }[]
+  milestones: {
+    amount_ore: number
+    is_goal: boolean
+    reached: { rate_pct: number; date: string | null }[]
+  }[]
 }
 
 export interface Forecast {

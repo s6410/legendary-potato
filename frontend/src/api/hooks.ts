@@ -23,6 +23,7 @@ import type {
   Rule,
   SavingsAccount,
   SavingsHistory,
+  SavingsPlanSummary,
   Summary,
   Target,
   TrendPoint,
@@ -102,6 +103,23 @@ export const useDrift = () =>
 
 export const useTargets = () =>
   useQuery({ queryKey: ['savings', 'targets'], queryFn: () => get<Target[]>('/savings/targets') })
+
+export const useSettings = () =>
+  useQuery({
+    queryKey: ['settings'],
+    queryFn: () => get<Record<string, string | null>>('/settings'),
+  })
+
+export const useSavingsPlanSummary = (rates: number[], goalOre?: number | null) =>
+  useQuery({
+    queryKey: ['savings', 'plan-summary', rates.join(','), goalOre ?? null],
+    queryFn: () =>
+      get<SavingsPlanSummary>('/savings/plan-summary', {
+        rates: rates.join(','),
+        ...(goalOre != null ? { goal_ore: goalOre } : {}),
+      }),
+    enabled: rates.length > 0,
+  })
 
 export const useMonthlyReport = (month: string) =>
   useQuery({
