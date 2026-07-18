@@ -129,3 +129,70 @@ def recurring_override(body: dict, db: Session = Depends(get_db)) -> dict:
 @router.get("/forecast")
 def forecast(months: int = Query(3, le=12), db: Session = Depends(get_db)) -> dict:
     return svc.forecast(db, months)
+
+
+@router.get("/observations")
+def observations(month: str, db: Session = Depends(get_db)) -> list[dict]:
+    from ..services.observations import generate_observations
+
+    return generate_observations(db, month)
+
+
+@router.get("/cashflow-forecast")
+def cashflow_forecast(days: int = Query(60, le=180), db: Session = Depends(get_db)) -> dict:
+    from ..services.cashflow_forecast import forecast_cashflow
+
+    return forecast_cashflow(db, days)
+
+
+@router.get("/by-member")
+def by_member(
+    period: str | None = None,
+    date_from: str | None = Query(None, alias="from"),
+    date_to: str | None = Query(None, alias="to"),
+    include_refunds: bool = False,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Utgifter/inkomster per hushållsmedlem + rättvis avräkning av utgifterna."""
+    f, t = _range(period, date_from, date_to)
+    rows = svc._analysis_rows(db, f, t, include_refunds)
+
+    buckets: dict[str | None, dict] = {}
+    for txn in rows:
+        b = buckets.setdefault(
+            txn.member,
+            {"member": txn.member, "expenses_ore": 0, "income_ore": 0, "transaction_count": 0},
+        )
+        if txn.amount_ore < 0:
+            b["expenses_ore"] += txn.amount_ore
+        else:
+            b["income_ore"] += txn.amount_ore
+        b["transaction_count"] += 1
+
+    members = sorted(
+        (b for b in buckets.values() if b["member"] is not None),
+        key=lambda b: b["expenses_ore"],
+    )
+    unassigned = buckets.get(None)
+
+    # avräkning: om alla namngivna medlemmar delar utgifterna lika, vem ligger ute?
+    settlement = []
+    if len(members) >= 2:
+        total_paid = sum(-b["expenses_ore"] for b in members)
+        fair_share = total_paid / len(members)
+        settlement = [
+            {
+                "member": b["member"],
+                "paid_ore": -b["expenses_ore"],
+                "fair_share_ore": round(fair_share),
+                "diff_ore": round(-b["expenses_ore"] - fair_share),
+            }
+            for b in members
+        ]
+    return {
+        "from": f,
+        "to": t,
+        "members": members,
+        "unassigned": unassigned,
+        "settlement": settlement,
+    }

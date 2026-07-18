@@ -8,23 +8,10 @@ from sqlalchemy.orm import Session
 
 from ..db.models import SavingsAccount, SavingsSnapshot, TargetAllocation
 from ..deps import get_db
+from ..services import savings as savings_service
+from ..services.savings import ASSET_CLASS_LABELS, latest_values as _latest_values
 
 router = APIRouter(prefix="/savings", tags=["savings"])
-
-ASSET_CLASS_LABELS = {
-    "equity": "Aktier",
-    "fixed_income": "Räntor",
-    "cash": "Kontanter",
-    "other": "Övrigt",
-}
-
-
-def _latest_values(db: Session) -> dict[int, tuple[str, int]]:
-    """savings_account_id -> (senaste datum, värde)"""
-    out: dict[int, tuple[str, int]] = {}
-    for snap in db.scalars(select(SavingsSnapshot).order_by(SavingsSnapshot.snapshot_date)):
-        out[snap.savings_account_id] = (snap.snapshot_date, snap.value_ore)
-    return out
 
 
 @router.get("/accounts")
@@ -195,30 +182,9 @@ def put_targets(body: TargetsIn, db: Session = Depends(get_db)) -> dict:
 
 @router.get("/drift")
 def drift(db: Session = Depends(get_db)) -> dict:
-    latest = _latest_values(db)
-    accounts = list(db.scalars(select(SavingsAccount).where(SavingsAccount.is_active == 1)))
-    by_class: dict[str, int] = {}
-    for a in accounts:
-        val = latest.get(a.id, (None, None))[1]
-        if val is not None:
-            by_class[a.asset_class] = by_class.get(a.asset_class, 0) + val
-    total = sum(by_class.values())
-    targets = {t.asset_class: t.target_pct for t in db.scalars(select(TargetAllocation))}
+    return savings_service.compute_drift(db)
 
-    classes = []
-    for asset_class in sorted(set(by_class) | set(targets)):
-        value = by_class.get(asset_class, 0)
-        current_pct = (value / total * 100) if total else 0.0
-        target_pct = targets.get(asset_class)
-        classes.append(
-            {
-                "asset_class": asset_class,
-                "label": ASSET_CLASS_LABELS.get(asset_class, asset_class),
-                "value_ore": value,
-                "current_pct": round(current_pct, 2),
-                "target_pct": target_pct,
-                "drift_pct": round(current_pct - target_pct, 2) if target_pct is not None else None,
-                "drift_ore": round(value - total * target_pct / 100) if target_pct is not None else None,
-            }
-        )
-    return {"total_ore": total, "classes": classes}
+
+@router.get("/rebalance")
+def rebalance(contribution_ore: int = 0, db: Session = Depends(get_db)) -> dict:
+    return savings_service.rebalance_plan(db, contribution_ore)

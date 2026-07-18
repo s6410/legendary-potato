@@ -65,6 +65,7 @@ class ParsedRow:
     description_norm: str
     balance_ore: int | None
     row_index: int
+    member: str | None = None
 
 
 @dataclass
@@ -92,7 +93,14 @@ class InspectionResult:
 # ---------------------------------------------------------------- inläsning
 
 def read_raw_rows(data: bytes, filename: str) -> tuple[str, list[list], str | None, str | None]:
-    """-> (file_type, rader med råceller, encoding, delimiter)"""
+    """-> (file_type, rader med råceller, encoding, delimiter)
+
+    För PDF används 'delimiter'-fältet till utfärdaridentiteten (entercard,
+    amex …) så att olika korts fakturor får olika formatprofiler.
+    """
+    if filename.lower().endswith(".pdf") or data[:5] == b"%PDF-":
+        rows, issuer = _read_pdf(data)
+        return ("pdf", rows, None, issuer)
     if filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
         return ("xlsx", _read_xlsx(data), None, None)
     encoding = _detect_encoding(data)
@@ -100,6 +108,54 @@ def read_raw_rows(data: bytes, filename: str) -> tuple[str, list[list], str | No
     delimiter = _detect_delimiter(text)
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     return ("csv", [row for row in reader], encoding, delimiter)
+
+
+_PDF_DATE = r"\d{4}-\d{2}-\d{2}|\d{2}[-./]\d{2}[-./]\d{2,4}"
+_PDF_ROW = re.compile(
+    rf"^({_PDF_DATE})(?:\s+({_PDF_DATE}))?\s+(.+?)\s+(-?\d[\d\s\xa0.]*,\d{{2}}-?)$"
+)
+_PDF_ISSUERS = (
+    ("entercard", "entercard"),
+    ("re:member", "entercard"),
+    ("american express", "amex"),
+    ("swedbank", "swedbank"),
+    ("handelsbanken", "handelsbanken"),
+)
+
+
+def _read_pdf(data: bytes) -> tuple[list[list], str]:
+    """Extrahera transaktionsrader ur en kortfaktura-PDF.
+
+    Heuristik: rader som börjar med en–två datum och slutar med ett belopp
+    med decimalkomma. Fungerar för Entercard- och Amex-fakturor m.fl.
+    """
+    import pdfplumber
+
+    pages = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        for page in pdf.pages:
+            pages.append(page.extract_text() or "")
+    all_text = "\n".join(pages)
+
+    issuer = "pdf"
+    low = all_text.casefold()
+    for needle, name in _PDF_ISSUERS:
+        if needle in low:
+            issuer = name
+            break
+
+    rows: list[list] = [["Transaktionsdatum", "Bokföringsdatum", "Beskrivning", "Belopp"]]
+    for line in all_text.splitlines():
+        m = _PDF_ROW.match(line.strip())
+        if not m:
+            continue
+        d1, d2, desc, amount = m.groups()
+        rows.append([d1, d2 or d1, desc.strip(), amount])
+    if len(rows) == 1:
+        raise ValueError(
+            "Hittade inga transaktionsrader i PDF:en — är det en kortfaktura med tabell?"
+        )
+    return rows, issuer
 
 
 def _read_xlsx(data: bytes) -> list[list]:
@@ -256,12 +312,13 @@ _HEADER_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     ("amount_in", ("insättning", "insättningar", "inbetalning", "kredit")),
     ("amount_out", ("uttag", "utbetalning", "debet")),
     ("balance", ("bokfört saldo", "saldo", "balance")),
+    ("member", ("kortmedlem", "kortinnehavare", "ägare", "innehavare", "medlem", "cardmember")),
 ]
 
 
 def guess_mapping(header: list[str], data_rows: list[list]) -> dict:
     mapping: dict = {"date": None, "description": None, "amount": None,
-                     "amount_in": None, "amount_out": None, "balance": None}
+                     "amount_in": None, "amount_out": None, "balance": None, "member": None}
     lower = [_cell_str(h).casefold() for h in header]
     for fld, keywords in _HEADER_KEYWORDS:
         for kw in keywords:
@@ -429,6 +486,7 @@ def parse_with_options(data: bytes, filename: str, opts: ParseOptions) -> ParseR
                 balance = None
 
         desc = _cell_str(cell("description")) or "(okänd)"
+        member = _cell_str(cell("member")) or None
         result.rows.append(
             ParsedRow(
                 booked_date=booked,
@@ -437,6 +495,7 @@ def parse_with_options(data: bytes, filename: str, opts: ParseOptions) -> ParseR
                 description_norm=normalize_description(desc),
                 balance_ore=balance,
                 row_index=idx,
+                member=member,
             )
         )
     return result

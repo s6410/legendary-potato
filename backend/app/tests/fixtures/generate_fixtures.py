@@ -122,6 +122,18 @@ def duplicate_coffee() -> None:
     (HERE / "duplicate_coffee.csv").write_bytes("\n".join(lines).encode("utf-8"))
 
 
+def handelsbanken_kort() -> None:
+    # Kreditkort med ägarkolumn: vem i hushållet som står för köpet
+    lines = [
+        "Transaktionsdatum;Ägare;Text;Belopp",
+        "2026-06-25;ANNA;BAUHAUS SICKLA;1249,00",
+        "2026-06-24;ERIK;ICA MAXI NACKA;832,50",
+        "2026-06-20;ANNA;SF BIO STOCKHOLM;298,00",
+        "2026-06-15;ERIK;INBETALNING;-5000,00",
+    ]
+    (HERE / "handelsbanken_kort.csv").write_bytes("\n".join(lines).encode("utf-8"))
+
+
 def preamble() -> None:
     # Okänt generiskt format: metadata före header, tusentalsavgränsare med hårt mellanslag
     lines = [
@@ -137,7 +149,33 @@ def preamble() -> None:
     (HERE / "preamble.csv").write_bytes("\n".join(lines).encode("utf-8"))
 
 
+def entercard_pdf() -> None:
+    # Efterliknar en Entercard-faktura: rubriker, metadata och transaktionsrader
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=11)
+    lines = [
+        "Entercard Sverige AB",
+        "Swedbank Mastercard Guld",
+        "Fakturaperiod 2026-06-01 - 2026-06-30",
+        "",
+        "Transaktionsdatum Bokforingsdatum Specifikation Belopp",
+        "2026-06-26 2026-06-28 BAUHAUS SICKLA 1 249,00",
+        "2026-06-20 2026-06-22 SAS STOCKHOLM 3 890,00",
+        "2026-06-15 2026-06-16 SPOTIFY AB 169,00",
+        "2026-06-10 2026-06-11 INBETALNING, TACK -8 450,00",
+        "",
+        "Att betala: 0,00",
+    ]
+    for line in lines:
+        pdf.cell(0, 8, line, new_x="LMARGIN", new_y="NEXT")
+    pdf.output(str(HERE / "entercard_faktura.pdf"))
+
+
 if __name__ == "__main__":
-    for fn in (swedbank, nordea, seb, entercard, amex, overlaps, duplicate_coffee, preamble):
+    for fn in (swedbank, nordea, seb, entercard, amex, overlaps, duplicate_coffee, preamble,
+               handelsbanken_kort, entercard_pdf):
         fn()
     print("Fixturer genererade i", HERE)
