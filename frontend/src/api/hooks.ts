@@ -22,6 +22,7 @@ import type {
   RecurringSeries,
   Rule,
   SavingsAccount,
+  SavingsDeposit,
   SavingsHistory,
   SavingsPlanSummary,
   Summary,
@@ -108,6 +109,13 @@ export const useSettings = () =>
   useQuery({
     queryKey: ['settings'],
     queryFn: () => get<Record<string, string | null>>('/settings'),
+  })
+
+export const useDeposits = (accountId: number | undefined) =>
+  useQuery({
+    queryKey: ['savings', 'deposits', accountId],
+    queryFn: () => get<SavingsDeposit[]>(`/savings/accounts/${accountId}/deposits`),
+    enabled: accountId != null,
   })
 
 export const useSavingsPlanSummary = (rates: number[], goalOre?: number | null) =>

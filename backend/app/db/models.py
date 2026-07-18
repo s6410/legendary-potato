@@ -137,6 +137,16 @@ class SavingsSnapshot(Base):
     created_at: Mapped[str] = mapped_column(default=now_iso)
 
 
+class SavingsDeposit(Base):
+    __tablename__ = "savings_deposits"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    savings_account_id: Mapped[int] = mapped_column(ForeignKey("savings_accounts.id"))
+    deposit_date: Mapped[str]
+    amount_ore: Mapped[int]
+    note: Mapped[str | None]
+    created_at: Mapped[str] = mapped_column(default=now_iso)
+
+
 class SavingsPlan(Base):
     __tablename__ = "savings_plans"
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -234,6 +234,13 @@ export interface SavingsAccount {
   latest_value_ore: number | null
 }
 
+export interface SavingsDeposit {
+  id: number
+  deposit_date: string
+  amount_ore: number
+  note: string | null
+}
+
 export interface SavingsHistory {
   dates: string[]
   invested: (number | null)[]

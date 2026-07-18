@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db.models import SavingsAccount, SavingsSnapshot, TargetAllocation
+from ..db.models import SavingsAccount, SavingsDeposit, SavingsSnapshot, TargetAllocation
 from ..deps import get_db
 from ..services import savings as savings_service
 from ..services import savings_plan as savings_plan_service
@@ -212,6 +212,63 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)) -> None:
     if not s:
         raise HTTPException(404, "Ögonblicksbilden finns inte")
     db.delete(s)
+
+
+class DepositIn(BaseModel):
+    deposit_date: str             # 'YYYY-MM-DD'
+    amount_ore: int               # negativt = uttag
+    note: str | None = None
+
+
+def _get_top_level_account(db: Session, account_id: int) -> SavingsAccount:
+    account = db.get(SavingsAccount, account_id)
+    if not account:
+        raise HTTPException(404, "Sparkontot finns inte")
+    if account.parent_id is not None:
+        raise HTTPException(422, "Engångsinsättningar läggs på kontot, inte på enskilda innehav")
+    return account
+
+
+@router.get("/accounts/{account_id}/deposits")
+def list_deposits(account_id: int, db: Session = Depends(get_db)) -> list[dict]:
+    _get_top_level_account(db, account_id)
+    deposits = db.scalars(
+        select(SavingsDeposit)
+        .where(SavingsDeposit.savings_account_id == account_id)
+        .order_by(SavingsDeposit.deposit_date.desc(), SavingsDeposit.id.desc())
+    )
+    return [
+        {"id": d.id, "deposit_date": d.deposit_date, "amount_ore": d.amount_ore, "note": d.note}
+        for d in deposits
+    ]
+
+
+@router.post("/accounts/{account_id}/deposits", status_code=201)
+def add_deposit(account_id: int, body: DepositIn, db: Session = Depends(get_db)) -> dict:
+    _get_top_level_account(db, account_id)
+    if body.amount_ore == 0:
+        raise HTTPException(422, "Beloppet får inte vara 0 (negativt = uttag)")
+    try:
+        date.fromisoformat(body.deposit_date)
+    except ValueError:
+        raise HTTPException(422, "Ogiltigt datum (använd ÅÅÅÅ-MM-DD)")
+    deposit = SavingsDeposit(
+        savings_account_id=account_id,
+        deposit_date=body.deposit_date,
+        amount_ore=body.amount_ore,
+        note=body.note.strip() if body.note and body.note.strip() else None,
+    )
+    db.add(deposit)
+    db.flush()
+    return {"id": deposit.id}
+
+
+@router.delete("/deposits/{deposit_id}", status_code=204)
+def delete_deposit(deposit_id: int, db: Session = Depends(get_db)) -> None:
+    d = db.get(SavingsDeposit, deposit_id)
+    if not d:
+        raise HTTPException(404, "Insättningen finns inte")
+    db.delete(d)
 
 
 class PlanIn(BaseModel):

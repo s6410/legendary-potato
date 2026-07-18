@@ -8,6 +8,12 @@ Insatt kapital beräknas alltid live: kontots värde vid första planstarten
 (startkapitalet, hämtat ur snapshots vid läsning) plus alla antagna
 insättningar. Inget frusets vid skapandet — värden som matas in i efterhand
 räknas därmed med, och kolumnen start_value_ore används inte längre.
+
+Utöver planen finns engångsinsättningar (savings_deposits, negativt belopp =
+uttag) som räknas in i insatt kapital från sitt datum. Konvention: en
+värdepunkt på datum D antas inkludera insättningar gjorda t.o.m. D, så
+baslinjen dras ner med engångsinsättningar t.o.m. sin värdepunkts datum för
+att undvika dubbelräkning.
 """
 from __future__ import annotations
 
@@ -17,7 +23,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..db.models import SavingsAccount, SavingsPlan, SavingsSnapshot
+from ..db.models import SavingsAccount, SavingsDeposit, SavingsPlan, SavingsSnapshot
 
 
 def deposit_count(start: date, as_of: date) -> int:
@@ -46,6 +52,25 @@ def _first_snapshot_date(db: Session, account_id: int) -> str | None:
     )
 
 
+def _latest_snapshot_date_until(db: Session, account_id: int, as_of: str) -> str | None:
+    return db.scalar(
+        select(func.max(SavingsSnapshot.snapshot_date)).where(
+            SavingsSnapshot.savings_account_id.in_(_leaf_ids(db, account_id)),
+            SavingsSnapshot.snapshot_date <= as_of,
+        )
+    )
+
+
+def account_deposits(db: Session, account_id: int) -> list[SavingsDeposit]:
+    return list(
+        db.scalars(select(SavingsDeposit).where(SavingsDeposit.savings_account_id == account_id))
+    )
+
+
+def _oneoffs_until(deposits: list[SavingsDeposit], as_of_iso: str) -> int:
+    return sum(d.amount_ore for d in deposits if d.deposit_date <= as_of_iso)
+
+
 def _deposits_until(rows: list[SavingsPlan], as_of: date) -> int:
     total = 0
     for row in rows:
@@ -55,31 +80,53 @@ def _deposits_until(rows: list[SavingsPlan], as_of: date) -> int:
     return total
 
 
-def _baseline(db: Session, account_id: int, rows: list[SavingsPlan], first_start: date) -> int:
-    """Startkapitalet: kontots värde vid första planstarten.
+def _baseline(
+    db: Session,
+    account_id: int,
+    rows: list[SavingsPlan],
+    deposits: list[SavingsDeposit],
+    first_start: date,
+) -> int:
+    """Startkapitalet: kontots värde vid första starten (plan eller insättning).
 
-    Saknas värden så långt bakåt (planen bakdaterad före första inmatningen)
+    Saknas värden så långt bakåt (starten bakdaterad före första inmatningen)
     antas avkastning 0 fram till första kända värdet: det värdet innehåller
     redan insättningarna gjorda dittills, så baslinjen blir värdet minus dem.
-    """
+    Engångsinsättningar t.o.m. baslinjens värdepunkt dras alltid av — de ingår
+    i värdet och läggs tillbaka i invested_at (ingen dubbelräkning)."""
     first_snap = _first_snapshot_date(db, account_id)
     if first_snap is None:
         return 0
     if first_snap <= first_start.isoformat():
-        return account_value_at(db, account_id, first_start.isoformat())
+        ref = _latest_snapshot_date_until(db, account_id, first_start.isoformat())
+        value = account_value_at(db, account_id, first_start.isoformat())
+        return value - _oneoffs_until(deposits, ref)
     snap_date = date.fromisoformat(first_snap)
-    return account_value_at(db, account_id, first_snap) - _deposits_until(rows, snap_date)
+    value = account_value_at(db, account_id, first_snap)
+    return value - _deposits_until(rows, snap_date) - _oneoffs_until(deposits, first_snap)
 
 
-def invested_at(db: Session, account_id: int, rows: list[SavingsPlan], as_of: date) -> int | None:
-    """Insatt kapital: startkapitalet + alla antagna insättningar t.o.m. as_of.
-    None före första radens start."""
-    if not rows:
+def invested_at(
+    db: Session,
+    account_id: int,
+    rows: list[SavingsPlan],
+    as_of: date,
+    deposits: list[SavingsDeposit] | None = None,
+) -> int | None:
+    """Insatt kapital: startkapitalet + antagna månadsinsättningar +
+    engångsinsättningar t.o.m. as_of. None före första planstarten/insättningen."""
+    if deposits is None:
+        deposits = account_deposits(db, account_id)
+    starts = [date.fromisoformat(r.start_date) for r in rows] + [
+        date.fromisoformat(d.deposit_date) for d in deposits
+    ]
+    if not starts:
         return None
-    first_start = min(date.fromisoformat(r.start_date) for r in rows)
+    first_start = min(starts)
     if as_of < first_start:
         return None
-    return _baseline(db, account_id, rows, first_start) + _deposits_until(rows, as_of)
+    baseline = _baseline(db, account_id, rows, deposits, first_start)
+    return baseline + _deposits_until(rows, as_of) + _oneoffs_until(deposits, as_of.isoformat())
 
 
 def account_value_at(db: Session, account_id: int, as_of: str) -> int:
@@ -172,6 +219,7 @@ def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: d
     by_account: dict[int, list[SavingsPlan]] = {}
     for row in all_rows:
         by_account.setdefault(row.savings_account_id, []).append(row)
+    deposits_by_account = _deposits_by_account(db)
 
     accounts_out = []
     total_invested = total_value = total_monthly = 0
@@ -180,7 +228,7 @@ def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: d
         if not active:
             continue
         account = db.get(SavingsAccount, account_id)
-        invested = invested_at(db, account_id, rows, today)
+        invested = invested_at(db, account_id, rows, today, deposits_by_account.get(account_id, []))
         if invested is None:
             # planen startar i framtiden — dagens värde är startkapitalet
             invested = account_value_at(db, account_id, active.start_date)
@@ -245,19 +293,35 @@ def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: d
     return {"accounts": accounts_out, "total": total, "forecast": forecast, "milestones": milestones}
 
 
+def _deposits_by_account(db: Session) -> dict[int, list[SavingsDeposit]]:
+    grouped: dict[int, list[SavingsDeposit]] = {}
+    for dep in db.scalars(select(SavingsDeposit)):
+        grouped.setdefault(dep.savings_account_id, []).append(dep)
+    return grouped
+
+
 def invested_series(db: Session, dates: list[str]) -> list[int | None]:
-    """Ackumulerat insatt kapital (alla konton med plan) per datum; None före första planstart."""
-    all_rows = list(db.scalars(select(SavingsPlan)))
-    if not all_rows:
-        return [None] * len(dates)
+    """Ackumulerat insatt kapital (konton med plan eller engångsinsättningar)
+    per datum; None före första planstarten/insättningen."""
     by_account: dict[int, list[SavingsPlan]] = {}
-    for row in all_rows:
+    for row in db.scalars(select(SavingsPlan)):
         by_account.setdefault(row.savings_account_id, []).append(row)
+    deposits_by_account = _deposits_by_account(db)
+    account_ids = set(by_account) | set(deposits_by_account)
+    if not account_ids:
+        return [None] * len(dates)
     out: list[int | None] = []
     for d in dates:
         as_of = date.fromisoformat(d)
         values = [
-            invested_at(db, account_id, rows, as_of) for account_id, rows in by_account.items()
+            invested_at(
+                db,
+                account_id,
+                by_account.get(account_id, []),
+                as_of,
+                deposits_by_account.get(account_id, []),
+            )
+            for account_id in account_ids
         ]
         known = [v for v in values if v is not None]
         out.append(sum(known) if known else None)

@@ -19,6 +19,7 @@ import {
   SnapshotDialog,
   TargetsDialog,
 } from '../components/savings/dialogs'
+import { DepositsDialog } from '../components/savings/DepositsDialog'
 import { ForecastCard, useForecastSettings } from '../components/savings/ForecastCard'
 import { PlanCard } from '../components/savings/PlanCard'
 import { formatDate, formatOre, formatPct, formatSigned, parseKr } from '../lib/format'
@@ -47,6 +48,7 @@ export function SavingsPage() {
   const tokens = useMemo(() => chartTokens(), [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [entering, setEntering] = useState(false)
+  const [managingDeposits, setManagingDeposits] = useState(false)
   const [addingAccount, setAddingAccount] = useState(false)
   const [addingHoldingTo, setAddingHoldingTo] = useState<SavingsAccount | null>(null)
   const [editingTargets, setEditingTargets] = useState(false)
@@ -64,6 +66,13 @@ export function SavingsPage() {
             className="rounded-lg border border-baseline px-3 py-1.5 text-sm hover:bg-grid"
           >
             + Sparkonto
+          </button>
+          <button
+            onClick={() => setManagingDeposits(true)}
+            disabled={accounts.length === 0}
+            className="rounded-lg border border-baseline px-3 py-1.5 text-sm hover:bg-grid disabled:opacity-50"
+          >
+            Insättningar
           </button>
           <button
             onClick={() => setEntering(true)}
@@ -196,6 +205,9 @@ export function SavingsPage() {
       )}
 
       {entering && <SnapshotDialog accounts={accounts} onClose={() => setEntering(false)} />}
+      {managingDeposits && (
+        <DepositsDialog accounts={accounts} onClose={() => setManagingDeposits(false)} />
+      )}
       {addingAccount && <AddAccountDialog onClose={() => setAddingAccount(false)} />}
       {addingHoldingTo && (
         <AddHoldingDialog parent={addingHoldingTo} onClose={() => setAddingHoldingTo(null)} />
