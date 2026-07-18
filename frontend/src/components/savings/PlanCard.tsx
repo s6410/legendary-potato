@@ -87,14 +87,20 @@ function PlanRow({ plan, onEdit }: { plan: SavingsPlanAccount; onEdit: () => voi
       </div>
       <div className="mt-1.5 text-sm">
         {buyPlan && buyPlan.allocations.length > 0 ? (
-          <ul className="flex flex-col gap-1">
-            {buyPlan.allocations.map((a) => (
-              <li key={a.id ?? a.label} className="flex justify-between">
-                <span className="text-ink-2">{a.label}</span>
-                <span className="tabular font-medium">{formatOre(a.amount_ore)}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="flex flex-col gap-1">
+              {buyPlan.allocations.map((a) => (
+                <li key={a.id ?? a.label} className="flex justify-between">
+                  <span className="text-ink-2">{a.label}</span>
+                  <span className="tabular font-medium">{formatOre(a.amount_ore)}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs text-muted">
+              Månadens köpförslag — underviktade innehav fylls först, så fördelningen kan
+              variera från månad till månad.
+            </p>
+          </>
         ) : (
           <p className="text-muted">Hela beloppet sätts in på kontot.</p>
         )}

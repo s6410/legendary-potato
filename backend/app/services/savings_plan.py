@@ -14,7 +14,7 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import SavingsAccount, SavingsPlan, SavingsSnapshot
@@ -31,15 +31,23 @@ def deposit_count(start: date, as_of: date) -> int:
     return months + 1
 
 
-def invested_at(db: Session, account_id: int, rows: list[SavingsPlan], as_of: date) -> int | None:
-    """Insatt kapital: kontots värde vid första planstarten + alla antagna
-    insättningar t.o.m. as_of. None före första radens start."""
-    if not rows:
-        return None
-    first_start = min(date.fromisoformat(r.start_date) for r in rows)
-    if as_of < first_start:
-        return None
-    total = account_value_at(db, account_id, first_start.isoformat())
+def _leaf_ids(db: Session, account_id: int) -> list[int]:
+    child_ids = list(
+        db.scalars(select(SavingsAccount.id).where(SavingsAccount.parent_id == account_id))
+    )
+    return child_ids or [account_id]
+
+
+def _first_snapshot_date(db: Session, account_id: int) -> str | None:
+    return db.scalar(
+        select(func.min(SavingsSnapshot.snapshot_date)).where(
+            SavingsSnapshot.savings_account_id.in_(_leaf_ids(db, account_id))
+        )
+    )
+
+
+def _deposits_until(rows: list[SavingsPlan], as_of: date) -> int:
+    total = 0
     for row in rows:
         row_start = date.fromisoformat(row.start_date)
         effective = min(as_of, date.fromisoformat(row.end_date)) if row.end_date else as_of
@@ -47,13 +55,37 @@ def invested_at(db: Session, account_id: int, rows: list[SavingsPlan], as_of: da
     return total
 
 
+def _baseline(db: Session, account_id: int, rows: list[SavingsPlan], first_start: date) -> int:
+    """Startkapitalet: kontots värde vid första planstarten.
+
+    Saknas värden så långt bakåt (planen bakdaterad före första inmatningen)
+    antas avkastning 0 fram till första kända värdet: det värdet innehåller
+    redan insättningarna gjorda dittills, så baslinjen blir värdet minus dem.
+    """
+    first_snap = _first_snapshot_date(db, account_id)
+    if first_snap is None:
+        return 0
+    if first_snap <= first_start.isoformat():
+        return account_value_at(db, account_id, first_start.isoformat())
+    snap_date = date.fromisoformat(first_snap)
+    return account_value_at(db, account_id, first_snap) - _deposits_until(rows, snap_date)
+
+
+def invested_at(db: Session, account_id: int, rows: list[SavingsPlan], as_of: date) -> int | None:
+    """Insatt kapital: startkapitalet + alla antagna insättningar t.o.m. as_of.
+    None före första radens start."""
+    if not rows:
+        return None
+    first_start = min(date.fromisoformat(r.start_date) for r in rows)
+    if as_of < first_start:
+        return None
+    return _baseline(db, account_id, rows, first_start) + _deposits_until(rows, as_of)
+
+
 def account_value_at(db: Session, account_id: int, as_of: str) -> int:
     """Kontots totala värde per datum: summan av lövens senaste snapshot ≤ as_of."""
-    child_ids = list(
-        db.scalars(select(SavingsAccount.id).where(SavingsAccount.parent_id == account_id))
-    )
     total = 0
-    for leaf_id in child_ids or [account_id]:
+    for leaf_id in _leaf_ids(db, account_id):
         value = db.scalar(
             select(SavingsSnapshot.value_ore)
             .where(

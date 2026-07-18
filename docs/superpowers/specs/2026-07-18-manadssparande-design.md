@@ -27,6 +27,10 @@ prognoser och månatliga köpförslag — utan manuell loggning av varje insätt
 > tills planen startar. Dessutom: en omsparad plan vars gamla rad startade i
 > samma kalendermånad ersätter raden helt (rättning) i stället för att kedjas
 > (beloppsbyte).
+>
+> Bakdaterad plan utan värden så långt bakåt: avkastningen antas vara 0 fram
+> till första kända värdepunkten — baslinjen blir första värdet minus de
+> insättningar som antas ha gjorts dittills.
 
 ## Datamodell
 

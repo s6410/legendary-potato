@@ -334,3 +334,30 @@ class TestCascade:
         client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
         client.delete(f"/api/savings/accounts/{isk}")
         assert list(db.scalars(select(SavingsPlan))) == []
+
+
+class TestBaselineAfterStart:
+    def test_first_snapshot_after_start_assumes_zero_return_until_then(self, db):
+        # regression: plan bakdaterad till 28 april men första kända värdet är
+        # 30 juni — fram till dess antas avkastning 0, inte startkapital 0
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 500_000, "2026-04-28")
+        _mk_snapshot(db, a.id, "2026-06-30", 380_000_000)
+        rows = list(db.scalars(select(SavingsPlan)))
+        # vid första värdepunkten: insatt = värdet (insättningarna ingår redan)
+        assert invested_at(db, a.id, rows, date(2026, 6, 30)) == 380_000_000
+        # 18 juli: ingen ny insättning ännu (nästa är 28 juli)
+        assert invested_at(db, a.id, rows, date(2026, 7, 18)) == 380_000_000
+        # 28 juli: en ny insättning
+        assert invested_at(db, a.id, rows, date(2026, 7, 28)) == 380_500_000
+
+    def test_summary_with_backdated_plan(self, db):
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 500_000, "2026-04-28")
+        _mk_snapshot(db, a.id, "2026-06-30", 380_000_000)
+        _mk_snapshot(db, a.id, "2026-07-18", 383_983_400)
+        s = plan_summary(db, [7.0], None, date(2026, 7, 18))
+        acct = s["accounts"][0]
+        # avkastning = tillväxten sedan första kända värdet
+        assert acct["invested_ore"] == 380_000_000
+        assert acct["return_ore"] == 3_983_400
