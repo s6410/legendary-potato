@@ -237,6 +237,23 @@ def delete_plan(account_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(404, "Kontot har ingen aktiv sparplan")
 
 
+@router.get("/plan-summary")
+def plan_summary(
+    rates: str = "4,7,10",
+    goal_ore: int | None = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    try:
+        rate_list = [float(r) for r in rates.split(",") if r.strip()]
+    except ValueError:
+        raise HTTPException(422, "Ogiltiga procentsatser")
+    if not 1 <= len(rate_list) <= 3 or any(not 0 <= r <= 30 for r in rate_list):
+        raise HTTPException(422, "Ange 1–3 procentsatser mellan 0 och 30")
+    if goal_ore is not None and goal_ore <= 0:
+        raise HTTPException(422, "Målbeloppet måste vara större än 0")
+    return savings_plan_service.plan_summary(db, rate_list, goal_ore, date.today())
+
+
 @router.get("/history")
 def history(db: Session = Depends(get_db)) -> dict:
     accounts = {a.id: a for a in db.scalars(select(SavingsAccount))}

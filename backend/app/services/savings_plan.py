@@ -102,3 +102,104 @@ def end_active_plan(db: Session, account_id: int, today: date) -> bool:
         return False
     active.end_date = today.isoformat()
     return True
+
+
+MILESTONES_ORE = [
+    10_000_000, 25_000_000, 50_000_000, 75_000_000,
+    100_000_000, 150_000_000, 200_000_000,
+]
+MILESTONE_COUNT = 3
+FORECAST_YEARS = 30
+
+
+def _add_months(d: date, months: int) -> date:
+    total = d.year * 12 + (d.month - 1) + months
+    year, month0 = divmod(total, 12)
+    day = min(d.day, monthrange(year, month0 + 1)[1])
+    return date(year, month0 + 1, day)
+
+
+def _forecast_series(start_value: int, monthly_ore: int, rate_pct: float) -> list[int]:
+    """Månadsvisa framtida värden, index 0..FORECAST_YEARS*12. Insättning i slutet av varje månad."""
+    factor = 1 + rate_pct / 100 / 12
+    values = [start_value]
+    value = float(start_value)
+    for _ in range(FORECAST_YEARS * 12):
+        value = value * factor + monthly_ore
+        values.append(round(value))
+    return values
+
+
+def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: date) -> dict:
+    all_rows = list(db.scalars(select(SavingsPlan)))
+    by_account: dict[int, list[SavingsPlan]] = {}
+    for row in all_rows:
+        by_account.setdefault(row.savings_account_id, []).append(row)
+
+    accounts_out = []
+    total_invested = total_value = total_monthly = 0
+    for account_id, rows in sorted(by_account.items()):
+        active = next((r for r in rows if r.end_date is None), None)
+        if not active:
+            continue
+        account = db.get(SavingsAccount, account_id)
+        invested = invested_at(rows, today) or 0
+        value = account_value_at(db, account_id, today.isoformat())
+        accounts_out.append(
+            {
+                "id": account_id,
+                "name": account.name,
+                "monthly_amount_ore": active.monthly_amount_ore,
+                "start_date": active.start_date,
+                "invested_ore": invested,
+                "current_value_ore": value,
+                "return_ore": value - invested,
+                "return_pct": round((value - invested) / invested, 4) if invested > 0 else 0.0,
+            }
+        )
+        total_invested += invested
+        total_value += value
+        total_monthly += active.monthly_amount_ore
+
+    if not accounts_out:
+        return {"accounts": [], "total": None, "forecast": [], "milestones": []}
+
+    total = {
+        "invested_ore": total_invested,
+        "current_value_ore": total_value,
+        "return_ore": total_value - total_invested,
+        "return_pct": round((total_value - total_invested) / total_invested, 4)
+        if total_invested > 0
+        else 0.0,
+        "monthly_amount_ore": total_monthly,
+    }
+
+    series_by_rate = {r: _forecast_series(total_value, total_monthly, r) for r in rates}
+    forecast = [
+        {
+            "rate_pct": rate,
+            "points": [
+                {"year": y, "value_ore": series[y * 12]} for y in range(FORECAST_YEARS + 1)
+            ],
+        }
+        for rate, series in series_by_rate.items()
+    ]
+
+    candidates = [(m, False) for m in MILESTONES_ORE if m > total_value][:MILESTONE_COUNT]
+    if goal_ore and goal_ore > total_value and goal_ore not in [m for m, _ in candidates]:
+        candidates.append((goal_ore, True))
+    milestones = []
+    for amount, is_goal in sorted(candidates):
+        reached = []
+        for rate in rates:
+            series = series_by_rate[rate]
+            month = next((i for i, v in enumerate(series) if v >= amount), None)
+            reached.append(
+                {
+                    "rate_pct": rate,
+                    "date": _add_months(today, month).isoformat() if month is not None else None,
+                }
+            )
+        milestones.append({"amount_ore": amount, "is_goal": is_goal, "reached": reached})
+
+    return {"accounts": accounts_out, "total": total, "forecast": forecast, "milestones": milestones}

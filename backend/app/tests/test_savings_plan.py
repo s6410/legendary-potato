@@ -5,9 +5,11 @@ from sqlalchemy import select
 
 from app.db.models import SavingsAccount, SavingsPlan, SavingsSnapshot
 from app.services.savings_plan import (
+    _forecast_series,
     deposit_count,
     end_active_plan,
     invested_at,
+    plan_summary,
     upsert_plan,
 )
 
@@ -161,3 +163,90 @@ class TestPlanApi:
         client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
         assert client.delete(f"/api/savings/accounts/{isk}/plan").status_code == 204
         assert client.delete(f"/api/savings/accounts/{isk}/plan").status_code == 404
+
+
+class TestForecastSeries:
+    def test_zero_rate_is_linear(self):
+        series = _forecast_series(0, 500_000, 0.0)
+        assert series[12] == 12 * 500_000
+
+    def test_compounds_monthly(self):
+        # 12 % årligen = 1 % per månad
+        series = _forecast_series(10_000_000, 0, 12.0)
+        assert series[1] == round(10_000_000 * 1.01)
+
+
+class TestPlanSummary:
+    def test_key_figures(self, db):
+        a = _mk_account(db)
+        _mk_snapshot(db, a.id, "2026-01-01", 10_000_000)
+        upsert_plan(db, a.id, 500_000, "2026-01-01")
+        _mk_snapshot(db, a.id, "2026-03-10", 11_800_000)
+        s = plan_summary(db, [7.0], None, date(2026, 3, 15))
+        acct = s["accounts"][0]
+        # insättningar 1 jan, 1 feb, 1 mar = 3 st ovanpå startkapitalet
+        assert acct["invested_ore"] == 10_000_000 + 3 * 500_000
+        assert acct["current_value_ore"] == 11_800_000
+        assert acct["return_ore"] == 300_000
+        assert acct["return_pct"] == round(300_000 / 11_500_000, 4)
+        assert s["total"]["monthly_amount_ore"] == 500_000
+
+    def test_empty_without_active_plan(self, db):
+        s = plan_summary(db, [7.0], None, date(2026, 3, 15))
+        assert s == {"accounts": [], "total": None, "forecast": [], "milestones": []}
+
+    def test_forecast_points_are_yearly(self, db):
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 500_000, "2026-01-01")
+        s = plan_summary(db, [0.0, 7.0], None, date(2026, 1, 1))
+        assert [f["rate_pct"] for f in s["forecast"]] == [0.0, 7.0]
+        zero = s["forecast"][0]["points"]
+        # index 0 = dagens värde (inga snapshots → 0); efter 1 år: 12 insättningar
+        assert zero[0] == {"year": 0, "value_ore": 0}
+        assert zero[1]["value_ore"] == 12 * 500_000
+
+    def test_milestones_with_zero_rate(self, db):
+        a = _mk_account(db)
+        _mk_snapshot(db, a.id, "2026-01-01", 9_000_000)
+        upsert_plan(db, a.id, 500_000, "2026-01-01")
+        s = plan_summary(db, [0.0], None, date(2026, 1, 1))
+        amounts = [m["amount_ore"] for m in s["milestones"]]
+        # tre närmaste över dagens värde 90 000 kr
+        assert amounts == [10_000_000, 25_000_000, 50_000_000]
+        first = s["milestones"][0]["reached"][0]
+        # 90 000 → 100 000 kr: 2 månadsinsättningar à 5 000 kr
+        assert first == {"rate_pct": 0.0, "date": "2026-03-01"}
+
+    def test_custom_goal_included_and_flagged(self, db):
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 500_000, "2026-01-01")
+        s = plan_summary(db, [0.0], 120_000_000, date(2026, 1, 1))
+        goal = next(m for m in s["milestones"] if m["is_goal"])
+        assert goal["amount_ore"] == 120_000_000
+
+    def test_unreachable_milestone_gives_null_date(self, db):
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 100, "2026-01-01")  # 1 kr/mån når aldrig 100 000 kr
+        s = plan_summary(db, [0.0], None, date(2026, 1, 1))
+        assert s["milestones"][0]["reached"][0]["date"] is None
+
+
+class TestPlanSummaryApi:
+    def test_summary_via_api(self, client):
+        isk = _create_account(client, "ISK")
+        client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
+        s = client.get("/api/savings/plan-summary").json()
+        # planen startade idag: 1 insättning, inga snapshots
+        assert s["accounts"][0]["invested_ore"] == 500_000
+        assert s["total"]["current_value_ore"] == 0
+
+    def test_rates_validation(self, client):
+        isk = _create_account(client, "ISK")
+        client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
+        assert client.get("/api/savings/plan-summary?rates=abc").status_code == 422
+        assert client.get("/api/savings/plan-summary?rates=4,7,10,12").status_code == 422
+        assert client.get("/api/savings/plan-summary?rates=55").status_code == 422
+        assert client.get("/api/savings/plan-summary?rates=4.5,7").status_code == 200
+
+    def test_goal_validation(self, client):
+        assert client.get("/api/savings/plan-summary?goal_ore=-5").status_code == 422
