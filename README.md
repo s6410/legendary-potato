@@ -33,6 +33,10 @@ All data lagras lokalt i en SQLite-databas på din dator. Ingenting lämnar din 
   se drift mot din målfördelning i både procentenheter och kronor — både per tillgångsslag
   över hela sparandet och mellan innehaven (t.ex. fonder med mål 82 %/18 %) inom varje
   ISK/konto, med rebalanseringsförslag per konto.
+- **Insatt kapital vs avkastning**: lägg upp månadssparande per konto och registrera
+  engångsinsättningar/uttag (även bakdaterade, t.ex. från ett kontoutdrag) — grafen visar
+  insatt kapital som egen linje så att insättningar aldrig ser ut som avkastning. Med
+  prognoskort: scenariobanor med egna procentsatser, målbelopp och milstolpsdatum.
 - **Månadsrapport** (utskriftsvänlig), global sök/filter, CSV-export, mörkt/ljust tema.
 
 ## Kom igång
