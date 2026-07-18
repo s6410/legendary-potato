@@ -8,6 +8,7 @@ import {
   useRebalance,
   useSavingsAccounts,
   useSavingsHistory,
+  useSavingsPlanSummary,
 } from '../api/hooks'
 import type { Drift, DriftAccountSection, SavingsAccount } from '../api/types'
 import { EChart } from '../components/EChart'
@@ -18,7 +19,8 @@ import {
   SnapshotDialog,
   TargetsDialog,
 } from '../components/savings/dialogs'
-import { formatDate, formatOre, formatSigned, parseKr } from '../lib/format'
+import { PlanCard } from '../components/savings/PlanCard'
+import { formatDate, formatOre, formatPct, formatSigned, parseKr } from '../lib/format'
 import { chartTokens, useTheme } from '../lib/theme'
 
 const CLASS_COLOR_INDEX: Record<string, number> = {
@@ -32,6 +34,8 @@ export function SavingsPage() {
   const { data: accounts = [] } = useSavingsAccounts()
   const { data: history } = useSavingsHistory()
   const { data: drift } = useDrift()
+  const { data: planSummary } = useSavingsPlanSummary([4, 7, 10])
+  const planTotal = planSummary?.total ?? null
   const { mode } = useTheme()
   const tokens = useMemo(() => chartTokens(), [mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -87,10 +91,36 @@ export function SavingsPage() {
         </div>
       ) : (
         <>
-          <div className="card mb-5 flex items-baseline justify-between px-5 py-4">
-            <span className="text-sm text-ink-2">Totalt sparande</span>
-            <span className="text-3xl font-bold tabular">{formatOre(drift?.total_ore ?? 0)}</span>
+          <div className="card mb-5 px-5 py-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
+              <div>
+                <div className="text-sm text-ink-2">Totalt sparande</div>
+                <div className="text-3xl font-bold tabular">{formatOre(drift?.total_ore ?? 0)}</div>
+              </div>
+              {planTotal && (
+                <>
+                  <div>
+                    <div className="text-sm text-ink-2">Insatt kapital</div>
+                    <div className="text-xl font-semibold tabular">
+                      {formatOre(planTotal.invested_ore)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm text-ink-2">Avkastning</div>
+                    <div
+                      className={`text-xl font-semibold tabular ${
+                        planTotal.return_ore >= 0 ? 'text-good' : 'text-bad'
+                      }`}
+                    >
+                      {formatSigned(planTotal.return_ore)} ({formatPct(planTotal.return_pct)})
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
+
+          <PlanCard accounts={accounts} planAccounts={planSummary?.accounts ?? []} />
 
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-4">
