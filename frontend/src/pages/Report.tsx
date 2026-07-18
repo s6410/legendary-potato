@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { useMonthlyReport } from '../api/hooks'
 import { AmountText } from '../components/AmountText'
@@ -17,6 +17,12 @@ export function ReportPage() {
         <h1 className="text-2xl font-bold">Månadsrapport</h1>
         <div className="flex items-center gap-3">
           <PeriodPicker month={month} onChange={(m) => navigate(`/rapport/${m}`)} />
+          <Link
+            to={`/rapport/ar/${month.slice(0, 4)}`}
+            className="rounded-lg border border-baseline px-3 py-1.5 text-sm hover:bg-grid"
+          >
+            Årsrapport {month.slice(0, 4)}
+          </Link>
           <button
             onClick={() => window.print()}
             className="rounded-lg border border-baseline px-3 py-1.5 text-sm hover:bg-grid"

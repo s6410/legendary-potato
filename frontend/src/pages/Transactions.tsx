@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { api, useAccounts, useApiMutation, useTransactions } from '../api/hooks'
+import { api, useAccounts, useApiMutation, useMembers, useTransactions } from '../api/hooks'
 import type { Txn } from '../api/types'
 import { AmountText } from '../components/AmountText'
 import { CategoryPicker } from '../components/CategoryPicker'
@@ -13,11 +13,12 @@ export function TransactionsPage() {
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [categorizing, setCategorizing] = useState<Txn[] | null>(null)
+  const [settingMember, setSettingMember] = useState<number[] | null>(null)
   const [page, setPage] = useState(1)
 
   const filters = useMemo(() => {
     const f: Record<string, unknown> = { page, page_size: 100 }
-    for (const key of ['from', 'to', 'account_id', 'category_id', 'q'] as const) {
+    for (const key of ['from', 'to', 'account_id', 'category_id', 'q', 'member'] as const) {
       const v = params.get(key)
       if (v) f[key] = v
     }
@@ -27,6 +28,7 @@ export function TransactionsPage() {
 
   const { data, isLoading } = useTransactions(filters)
   const { data: accounts = [] } = useAccounts()
+  const { data: members = [] } = useMembers()
 
   function setFilter(key: string, value: string | null) {
     setPage(1)
@@ -103,6 +105,21 @@ export function TransactionsPage() {
           onChange={(e) => setFilter('to', e.target.value || null)}
           aria-label="Till datum"
         />
+        {members.length > 0 && (
+          <select
+            value={params.get('member') ?? ''}
+            onChange={(e) => setFilter('member', e.target.value || null)}
+            aria-label="Medlem"
+          >
+            <option value="">Alla medlemmar</option>
+            {members.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+            <option value="__none__">Utan medlem</option>
+          </select>
+        )}
         <label className="flex items-center gap-1.5 text-sm text-ink-2">
           <input
             type="checkbox"
@@ -133,6 +150,12 @@ export function TransactionsPage() {
             className="rounded-lg bg-accent px-3 py-1.5 font-medium text-white hover:opacity-90"
           >
             Kategorisera …
+          </button>
+          <button
+            onClick={() => setSettingMember([...selected])}
+            className="rounded-lg border border-baseline px-3 py-1.5 hover:bg-grid"
+          >
+            Sätt medlem …
           </button>
           <button onClick={() => setSelected(new Set())} className="text-ink-2 hover:underline">
             Avmarkera
@@ -227,7 +250,74 @@ export function TransactionsPage() {
           }}
         />
       )}
+      {settingMember && (
+        <MemberDialog
+          ids={settingMember}
+          members={members}
+          onClose={() => {
+            setSettingMember(null)
+            setSelected(new Set())
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function MemberDialog({
+  ids,
+  members,
+  onClose,
+}: {
+  ids: number[]
+  members: string[]
+  onClose: () => void
+}) {
+  const [choice, setChoice] = useState<string>(members[0] ?? '')
+  const [custom, setCustom] = useState('')
+  const mutation = useApiMutation(
+    () =>
+      api.send('POST', '/transactions/bulk-member', {
+        ids,
+        member: choice === '__custom__' ? custom.trim() : choice === '__none__' ? null : choice,
+      }),
+    onClose,
+  )
+  const valid = choice === '__none__' || (choice === '__custom__' ? custom.trim() !== '' : choice !== '')
+  return (
+    <Modal title={`Sätt medlem för ${ids.length} transaktioner`} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-sm">
+        <select value={choice} onChange={(e) => setChoice(e.target.value)}>
+          {members.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+          <option value="__custom__">+ Ny medlem …</option>
+          <option value="__none__">(rensa medlem)</option>
+        </select>
+        {choice === '__custom__' && (
+          <input
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            placeholder="Namn, t.ex. Anna"
+            autoFocus
+          />
+        )}
+        <div className="mt-2 flex justify-end gap-3">
+          <button onClick={onClose} className="rounded-lg border border-baseline px-4 py-2 hover:bg-grid">
+            Avbryt
+          </button>
+          <button
+            disabled={!valid || mutation.isPending}
+            onClick={() => mutation.mutate(undefined)}
+            className="rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Spara
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -268,6 +358,11 @@ function TxnRow({
       <td className="max-w-md px-3 py-2">
         <span className="block truncate">
           {txn.description} {linkBadge}
+          {txn.member && (
+            <span className="ml-1.5 rounded-full bg-series-7/15 px-1.5 py-0.5 text-xs text-ink-2">
+              {txn.member}
+            </span>
+          )}
         </span>
         {txn.note && <span className="block truncate text-xs text-muted">{txn.note}</span>}
       </td>

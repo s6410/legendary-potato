@@ -135,6 +135,16 @@ def yearly(year: int, db: Session = Depends(get_db)) -> dict:
 
     savings_start = total_at(f"{year - 1}-12-31")
     savings_end = total_at(t)
+    if savings_start is None and savings_end is not None:
+        # ingen historik före året — utgå från årets första mätpunkt
+        from sqlalchemy import func as sa_func
+
+        first_in_year = db.scalar(
+            sa_select(sa_func.min(SavingsSnapshot.snapshot_date)).where(
+                SavingsSnapshot.snapshot_date >= f, SavingsSnapshot.snapshot_date <= t
+            )
+        )
+        savings_start = total_at(first_in_year) if first_in_year else None
 
     savings_rates = [m["savings_rate"] for m in months if m["savings_rate"] is not None]
 

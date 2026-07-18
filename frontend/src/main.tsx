@@ -7,6 +7,8 @@ import App from './App'
 import './index.css'
 import { BudgetPage } from './pages/Budget'
 import { CategoriesPage } from './pages/Categories'
+import { HouseholdPage } from './pages/Household'
+import { YearlyReportPage } from './pages/YearlyReport'
 import { ImportHistoryPage } from './pages/ImportHistory'
 import { ImportPage } from './pages/Import'
 import { OverviewPage } from './pages/Overview'
@@ -36,7 +38,9 @@ const router = createBrowserRouter([
       { path: 'aterbetalningar', element: <RefundsPage /> },
       { path: 'prenumerationer', element: <SubscriptionsPage /> },
       { path: 'budget', element: <BudgetPage /> },
+      { path: 'hushall', element: <HouseholdPage /> },
       { path: 'rapport', element: <ReportPage /> },
+      { path: 'rapport/ar/:year', element: <YearlyReportPage /> },
       { path: 'rapport/:month', element: <ReportPage /> },
       { path: 'sparande', element: <SavingsPage /> },
       { path: 'installningar', element: <SettingsPage /> },
