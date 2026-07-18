@@ -228,6 +228,7 @@ export interface SavingsAccount {
   sort_order: number
   parent_id: number | null
   target_pct: number | null
+  drift_band_pct: number | null
   has_holdings: boolean
   latest_date: string | null
   latest_value_ore: number | null
@@ -269,6 +270,7 @@ export interface DriftAccountSection {
   id: number
   name: string
   total_ore: number
+  band_pct: number | null
   holdings: DriftHolding[]
 }
 

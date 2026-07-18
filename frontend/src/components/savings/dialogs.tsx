@@ -254,6 +254,11 @@ export function HoldingTargetsDialog({
   const [values, setValues] = useState<Record<number, string>>(() =>
     Object.fromEntries(section.holdings.map((h) => [h.id, String(h.target_pct ?? 0)])),
   )
+  const [bandText, setBandText] = useState(
+    section.band_pct != null ? String(section.band_pct).replace('.', ',') : '',
+  )
+  const band = bandText.trim() ? parseFloat(bandText.replace(',', '.')) : null
+  const bandInvalid = band != null && (!Number.isFinite(band) || band < 0 || band > 50)
   const total = Object.values(values).reduce((s, v) => s + (parseFloat(v.replace(',', '.')) || 0), 0)
   const mutation = useApiMutation(
     () =>
@@ -262,6 +267,7 @@ export function HoldingTargetsDialog({
           id: h.id,
           target_pct: parseFloat((values[h.id] ?? '0').replace(',', '.')) || 0,
         })),
+        drift_band_pct: band,
       }),
     onClose,
   )
@@ -285,13 +291,33 @@ export function HoldingTargetsDialog({
         <div className={`text-right text-xs ${Math.abs(total - 100) > 1 ? 'text-bad' : 'text-muted'}`}>
           Summa: {String(Math.round(total * 10) / 10).replace('.', ',')} % (ska bli 100 %)
         </div>
+        <label className="mt-1 flex items-center justify-between gap-3 border-t border-bord/50 pt-3">
+          <span>
+            Toleransband
+            <span className="block text-xs text-muted">
+              Drift inom ± så många procentenheter flaggas inte. Tomt = flagga som vanligt.
+            </span>
+          </span>
+          <span className="flex items-center gap-1">
+            ±
+            <input
+              inputMode="decimal"
+              className="w-20 text-right"
+              placeholder="t.ex. 4"
+              value={bandText}
+              onChange={(e) => setBandText(e.target.value)}
+            />
+            %
+          </span>
+        </label>
+        {bandInvalid && <span className="text-right text-xs text-bad">Bandet ska vara 0–50</span>}
         {mutation.isError && <span className="text-bad">{(mutation.error as Error).message}</span>}
         <div className="mt-2 flex justify-end gap-3">
           <button onClick={onClose} className="rounded-lg border border-baseline px-4 py-2 hover:bg-grid">
             Avbryt
           </button>
           <button
-            disabled={mutation.isPending || Math.abs(total - 100) > 1}
+            disabled={mutation.isPending || Math.abs(total - 100) > 1 || bandInvalid}
             onClick={() => mutation.mutate(undefined)}
             className="rounded-lg bg-accent px-4 py-2 font-medium text-white hover:opacity-90 disabled:opacity-50"
           >

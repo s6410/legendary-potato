@@ -126,3 +126,40 @@ class TestHoldingsValidation:
         client.patch(f"/api/savings/accounts/{fond}", json={"target_pct": 50})
         accounts = {a["id"]: a for a in client.get("/api/savings/accounts").json()}
         assert accounts[fond]["target_pct"] == 100
+
+
+class TestDriftBand:
+    def _put_targets(self, client, isk, fond_a, fond_b, **extra):
+        return client.put(f"/api/savings/accounts/{isk}/targets", json={
+            "targets": [{"id": fond_a, "target_pct": 82}, {"id": fond_b, "target_pct": 18}],
+            **extra,
+        })
+
+    def test_band_persists_and_shows_in_drift(self, client):
+        isk, fond_a, fond_b, _ = _setup_isk(client)
+        r = self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=4)
+        assert r.status_code == 200, r.text
+        accounts = {a["id"]: a for a in client.get("/api/savings/accounts").json()}
+        assert accounts[isk]["drift_band_pct"] == 4
+        drift = client.get("/api/savings/drift").json()
+        acct = next(a for a in drift["accounts"] if a["id"] == isk)
+        assert acct["band_pct"] == 4
+
+    def test_band_null_clears(self, client):
+        isk, fond_a, fond_b, _ = _setup_isk(client)
+        self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=4)
+        self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=None)
+        accounts = {a["id"]: a for a in client.get("/api/savings/accounts").json()}
+        assert accounts[isk]["drift_band_pct"] is None
+
+    def test_band_omitted_is_kept(self, client):
+        isk, fond_a, fond_b, _ = _setup_isk(client)
+        self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=4)
+        self._put_targets(client, isk, fond_a, fond_b)
+        accounts = {a["id"]: a for a in client.get("/api/savings/accounts").json()}
+        assert accounts[isk]["drift_band_pct"] == 4
+
+    def test_band_validation(self, client):
+        isk, fond_a, fond_b, _ = _setup_isk(client)
+        assert self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=-1).status_code == 422
+        assert self._put_targets(client, isk, fond_a, fond_b, drift_band_pct=51).status_code == 422

@@ -43,6 +43,7 @@ def list_savings_accounts(db: Session = Depends(get_db)) -> list[dict]:
             "sort_order": a.sort_order,
             "parent_id": a.parent_id,
             "target_pct": a.target_pct,
+            "drift_band_pct": a.drift_band_pct,
             "has_holdings": a.id in grouped,
             "latest_date": latest_for(a)[0],
             "latest_value_ore": latest_for(a)[1],
@@ -115,6 +116,7 @@ def update_savings_account(account_id: int, body: dict, db: Session = Depends(ge
 
 class HoldingTargetsIn(BaseModel):
     targets: list[dict]           # [{id, target_pct}]
+    drift_band_pct: float | None = None   # utelämnat = orört, null = rensa
 
 
 @router.put("/accounts/{account_id}/targets")
@@ -133,6 +135,10 @@ def put_holding_targets(account_id: int, body: HoldingTargetsIn, db: Session = D
         if not holding:
             raise HTTPException(422, f"Innehav {t['id']} tillhör inte kontot")
         holding.target_pct = float(t["target_pct"])
+    if "drift_band_pct" in body.model_fields_set:
+        if body.drift_band_pct is not None and not 0 <= body.drift_band_pct <= 50:
+            raise HTTPException(422, "Toleransbandet måste vara 0–50 procentenheter")
+        db.get(SavingsAccount, account_id).drift_band_pct = body.drift_band_pct
     return {"ok": True}
 
 

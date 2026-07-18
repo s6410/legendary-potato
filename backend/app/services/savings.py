@@ -98,6 +98,7 @@ def compute_drift(db: Session) -> dict:
                     "id": a.id,
                     "name": a.name,
                     "total_ore": acct_value,
+                    "band_pct": a.drift_band_pct,
                     "holdings": [
                         {"id": k.id, "name": k.name, **_drift_fields(kid_values[k.id], acct_value, k.target_pct)}
                         for k in sorted(kids, key=lambda k: (k.sort_order, k.id))

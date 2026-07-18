@@ -124,6 +124,7 @@ class SavingsAccount(Base):
     sort_order: Mapped[int] = mapped_column(default=0)
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("savings_accounts.id"))
     target_pct: Mapped[float | None]
+    drift_band_pct: Mapped[float | None]
     created_at: Mapped[str] = mapped_column(default=now_iso)
 
 

@@ -296,6 +296,24 @@ interface DriftRow {
   target_pct: number | null
   drift_pct: number | null
   drift_ore: number | null
+  band_pct?: number | null
+}
+
+function DriftBadge({ row }: { row: DriftRow }) {
+  if (row.drift_ore == null) return null
+  const drift = Math.abs(row.drift_pct ?? 0)
+  const label = `${row.drift_ore > 0 ? 'Övervikt' : 'Undervikt'} ${formatOre(Math.abs(row.drift_ore))} (${String(drift).replace('.', ',')} procentenheter)`
+  if (row.band_pct != null) {
+    if (drift <= row.band_pct)
+      return drift >= 1 ? (
+        <div className="mt-1 text-xs text-muted">
+          Inom bandet ±{String(row.band_pct).replace('.', ',')} %
+        </div>
+      ) : null
+    return <div className="mt-1 text-xs text-bad">{label}</div>
+  }
+  if (drift < 1) return null
+  return <div className={`mt-1 text-xs ${drift >= 5 ? 'text-bad' : 'text-muted'}`}>{label}</div>
 }
 
 function DriftView({ rows }: { rows: DriftRow[] }) {
@@ -326,12 +344,7 @@ function DriftView({ rows }: { rows: DriftRow[] }) {
               />
             )}
           </div>
-          {c.drift_ore != null && Math.abs(c.drift_pct ?? 0) >= 1 && (
-            <div className={`mt-1 text-xs ${Math.abs(c.drift_pct ?? 0) >= 5 ? 'text-bad' : 'text-muted'}`}>
-              {c.drift_ore > 0 ? 'Övervikt' : 'Undervikt'} {formatOre(Math.abs(c.drift_ore))} (
-              {String(Math.abs(c.drift_pct ?? 0)).replace('.', ',')} procentenheter)
-            </div>
-          )}
+          <DriftBadge row={c} />
         </div>
       ))}
     </div>
@@ -354,7 +367,11 @@ function HoldingsDriftCard({
           <div key={s.id}>
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-medium">
-                {s.name} <span className="text-muted">· {formatOre(s.total_ore)}</span>
+                {s.name}{' '}
+                <span className="text-muted">
+                  · {formatOre(s.total_ore)}
+                  {s.band_pct != null && ` · band ±${String(s.band_pct).replace('.', ',')} %`}
+                </span>
               </span>
               <button
                 onClick={() => setEditing(s)}
@@ -373,6 +390,7 @@ function HoldingsDriftCard({
                   target_pct: h.target_pct,
                   drift_pct: h.drift_pct,
                   drift_ore: h.drift_ore,
+                  band_pct: s.band_pct,
                 }))}
               />
             ) : (
@@ -391,6 +409,13 @@ function RebalanceCard({ drift }: { drift: Drift }) {
   const [scope, setScope] = useState<'classes' | number>('classes')
   const contribution = parseKr(amountText) ?? 0
   const { data: plan } = useRebalance(contribution, scope === 'classes' ? undefined : scope)
+
+  const section = scope === 'classes' ? null : drift.accounts.find((a) => a.id === scope)
+  const withinBand =
+    section?.band_pct != null &&
+    section.holdings.every(
+      (h) => h.target_pct == null || Math.abs(h.drift_pct ?? 0) <= section.band_pct!,
+    )
 
   return (
     <div className="card mt-5 p-5">
@@ -423,7 +448,12 @@ function RebalanceCard({ drift }: { drift: Drift }) {
         />
         <span>kr — var gör de mest nytta?</span>
       </div>
-      {plan && plan.allocations.length > 0 ? (
+      {plan?.requires_selling && withinBand ? (
+        <p className="mt-3 text-sm text-muted">
+          Allt inom toleransbandet ±{String(section!.band_pct).replace('.', ',')} % — ingen
+          rebalansering behövs.
+        </p>
+      ) : plan && plan.allocations.length > 0 ? (
         <>
           <ul className="mt-3 flex flex-col gap-1.5 text-sm">
             {plan.allocations.map((a) => (
