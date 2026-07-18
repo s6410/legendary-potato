@@ -118,3 +118,46 @@ class TestUpsertPlan:
         # insatt kapital fryses efter avslut
         assert invested_at(rows, date(2026, 12, 1)) == invested_at(rows, date(2026, 7, 18))
         assert end_active_plan(db, a.id, date(2026, 7, 19)) is False
+
+
+def _create_account(client, name, **extra):
+    r = client.post("/api/savings/accounts", json={"name": name, "asset_class": "equity", **extra})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+class TestPlanApi:
+    def test_put_creates_plan(self, client):
+        isk = _create_account(client, "ISK")
+        r = client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
+        assert r.status_code == 200, r.text
+        assert "id" in r.json()
+
+    def test_plan_on_holding_rejected(self, client):
+        isk = _create_account(client, "ISK")
+        fond = _create_account(client, "Fond", parent_id=isk, target_pct=100)
+        r = client.put(f"/api/savings/accounts/{fond}/plan", json={"monthly_amount_ore": 500_000})
+        assert r.status_code == 422
+
+    def test_nonpositive_amount_rejected(self, client):
+        isk = _create_account(client, "ISK")
+        r = client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 0})
+        assert r.status_code == 422
+
+    def test_unknown_account_404(self, client):
+        r = client.put("/api/savings/accounts/999/plan", json={"monthly_amount_ore": 500_000})
+        assert r.status_code == 404
+
+    def test_bad_start_date_rejected(self, client):
+        isk = _create_account(client, "ISK")
+        r = client.put(
+            f"/api/savings/accounts/{isk}/plan",
+            json={"monthly_amount_ore": 500_000, "start_date": "igår"},
+        )
+        assert r.status_code == 422
+
+    def test_delete_ends_plan_and_404_without(self, client):
+        isk = _create_account(client, "ISK")
+        client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
+        assert client.delete(f"/api/savings/accounts/{isk}/plan").status_code == 204
+        assert client.delete(f"/api/savings/accounts/{isk}/plan").status_code == 404

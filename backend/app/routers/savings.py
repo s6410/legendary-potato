@@ -1,6 +1,8 @@
 """Sparande: konton, manuella värdeögonblicksbilder, målfördelning och drift."""
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..db.models import SavingsAccount, SavingsSnapshot, TargetAllocation
 from ..deps import get_db
 from ..services import savings as savings_service
+from ..services import savings_plan as savings_plan_service
 from ..services.savings import ASSET_CLASS_LABELS, latest_values as _latest_values
 
 router = APIRouter(prefix="/savings", tags=["savings"])
@@ -203,6 +206,35 @@ def delete_snapshot(snapshot_id: int, db: Session = Depends(get_db)) -> None:
     if not s:
         raise HTTPException(404, "Ögonblicksbilden finns inte")
     db.delete(s)
+
+
+class PlanIn(BaseModel):
+    monthly_amount_ore: int
+    start_date: str | None = None
+
+
+@router.put("/accounts/{account_id}/plan")
+def put_plan(account_id: int, body: PlanIn, db: Session = Depends(get_db)) -> dict:
+    account = db.get(SavingsAccount, account_id)
+    if not account:
+        raise HTTPException(404, "Sparkontot finns inte")
+    if account.parent_id is not None:
+        raise HTTPException(422, "Sparplaner läggs på kontot, inte på enskilda innehav")
+    if body.monthly_amount_ore <= 0:
+        raise HTTPException(422, "Månadsbeloppet måste vara större än 0")
+    start = body.start_date or date.today().isoformat()
+    try:
+        date.fromisoformat(start)
+    except ValueError:
+        raise HTTPException(422, "Ogiltigt startdatum (använd ÅÅÅÅ-MM-DD)")
+    plan = savings_plan_service.upsert_plan(db, account_id, body.monthly_amount_ore, start)
+    return {"id": plan.id}
+
+
+@router.delete("/accounts/{account_id}/plan", status_code=204)
+def delete_plan(account_id: int, db: Session = Depends(get_db)) -> None:
+    if not savings_plan_service.end_active_plan(db, account_id, date.today()):
+        raise HTTPException(404, "Kontot har ingen aktiv sparplan")
 
 
 @router.get("/history")
