@@ -19,6 +19,7 @@ import {
   SnapshotDialog,
   TargetsDialog,
 } from '../components/savings/dialogs'
+import { ForecastCard, useForecastSettings } from '../components/savings/ForecastCard'
 import { PlanCard } from '../components/savings/PlanCard'
 import { formatDate, formatOre, formatPct, formatSigned, parseKr } from '../lib/format'
 import { chartTokens, useTheme } from '../lib/theme'
@@ -34,7 +35,13 @@ export function SavingsPage() {
   const { data: accounts = [] } = useSavingsAccounts()
   const { data: history } = useSavingsHistory()
   const { data: drift } = useDrift()
-  const { data: planSummary } = useSavingsPlanSummary([4, 7, 10])
+  const forecastSettings = useForecastSettings()
+  const { data: planSummary } = useSavingsPlanSummary(
+    forecastSettings.rates,
+    forecastSettings.goalOre != null && forecastSettings.goalOre > 0
+      ? forecastSettings.goalOre
+      : undefined,
+  )
   const planTotal = planSummary?.total ?? null
   const { mode } = useTheme()
   const tokens = useMemo(() => chartTokens(), [mode]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -180,6 +187,10 @@ export function SavingsPage() {
               <h2 className="mb-2 font-semibold">Utveckling över tid</h2>
               <EChart height={300} option={historyOption(history, tokens)} />
             </div>
+          )}
+
+          {planSummary && planSummary.accounts.length > 0 && (
+            <ForecastCard state={forecastSettings} summary={planSummary} tokens={tokens} />
           )}
         </>
       )}
@@ -470,19 +481,35 @@ function historyOption(
       axisLabel: { color: t.muted, fontSize: 10, formatter: (v: number) => formatOre(v) },
       splitLine: { lineStyle: { color: t.grid } },
     },
-    series: history.series.map((s, i) => ({
-      name: s.name,
-      type: 'line',
-      stack: 'total',
-      areaStyle: { opacity: 0.35 },
-      lineStyle: { width: 2 },
-      symbol: 'circle',
-      symbolSize: 5,
-      itemStyle: { color: t.series[i % t.series.length] },
-      color: t.series[i % t.series.length],
-      data: s.values,
-      connectNulls: true,
-    })),
+    series: [
+      ...history.series.map((s, i) => ({
+        name: s.name,
+        type: 'line' as const,
+        stack: 'total',
+        areaStyle: { opacity: 0.35 },
+        lineStyle: { width: 2 },
+        symbol: 'circle',
+        symbolSize: 5,
+        itemStyle: { color: t.series[i % t.series.length] },
+        color: t.series[i % t.series.length],
+        data: s.values,
+        connectNulls: true,
+      })),
+      ...(history.invested.some((v) => v != null)
+        ? [
+            {
+              name: 'Insatt kapital',
+              type: 'line' as const,
+              data: history.invested,
+              symbol: 'circle' as const,
+              symbolSize: 4,
+              lineStyle: { width: 2, type: 'dashed' as const, color: t.ink },
+              itemStyle: { color: t.ink },
+              z: 5,
+            },
+          ]
+        : []),
+    ],
   }
 }
 

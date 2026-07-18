@@ -119,6 +119,9 @@ export const useSavingsPlanSummary = (rates: number[], goalOre?: number | null) 
         ...(goalOre != null ? { goal_ore: goalOre } : {}),
       }),
     enabled: rates.length > 0,
+    // behåll föregående svar medan nya procentsatser hämtas — annars avmonteras
+    // prognoskortet mitt i en blur och inställningarna hinner aldrig sparas
+    placeholderData: (prev) => prev,
   })
 
 export const useMonthlyReport = (month: string) =>
