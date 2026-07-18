@@ -115,13 +115,15 @@ def _read_xlsx(data: bytes) -> list[list]:
 def _detect_encoding(data: bytes) -> str:
     if data.startswith(b"\xef\xbb\xbf"):
         return "utf-8-sig"
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        return "utf-16"  # annars blir UTF-16 NUL-interfolierat cp1252-skräp
     for enc in ("utf-8", "cp1252"):
         try:
             data.decode(enc)
             return enc
         except UnicodeDecodeError:
             continue
-    return "cp1252"
+    return "latin-1"  # kan aldrig misslyckas — hellre läsbart än HTTP-fel
 
 
 def _detect_delimiter(text: str) -> str:
@@ -172,6 +174,14 @@ def parse_amount(cell, decimal_sep: str = ",", thousands_sep: str | None = None)
     s = _cell_str(cell).replace("\xa0", " ").replace("−", "-").replace("kr", "").strip()
     if not s:
         raise ValueError("tomt belopp")
+    # negativa format som vissa banker använder: "(1 234,00)" och "1 234,00-"
+    negative = False
+    if s.startswith("(") and s.endswith(")"):
+        negative = True
+        s = s[1:-1].strip()
+    if s.endswith("-"):
+        negative = True
+        s = s[:-1].strip()
     if thousands_sep:
         s = s.replace(thousands_sep, "")
     s = s.replace(" ", "")
@@ -180,9 +190,10 @@ def parse_amount(cell, decimal_sep: str = ",", thousands_sep: str | None = None)
     else:
         s = s.replace(",", "")
     try:
-        return int(round(Decimal(s) * 100))
+        value = int(round(Decimal(s) * 100))
     except InvalidOperation as e:
         raise ValueError(f"kan inte tolka belopp: {cell!r}") from e
+    return -abs(value) if negative else value
 
 
 def parse_date_cell(cell, fmt: str) -> str:
@@ -390,10 +401,18 @@ def parse_with_options(data: bytes, filename: str, opts: ParseOptions) -> ParseR
             else:
                 inflow = cell("amount_in")
                 outflow = cell("amount_out")
+                has_in = inflow is not None and _cell_str(inflow)
+                has_out = outflow is not None and _cell_str(outflow)
+                if not has_in and not has_out:
+                    # info-rader (t.ex. "Ingående saldo") ska inte bli 0-kronorsposter
+                    result.skipped.append(
+                        {"row_index": idx, "reason": "tomt belopp", "cells": str_cells}
+                    )
+                    continue
                 amount = 0
-                if inflow is not None and _cell_str(inflow):
+                if has_in:
                     amount += abs(parse_amount(inflow, opts.decimal_separator, opts.thousands_separator))
-                if outflow is not None and _cell_str(outflow):
+                if has_out:
                     amount -= abs(parse_amount(outflow, opts.decimal_separator, opts.thousands_separator))
         except ValueError:
             result.skipped.append({"row_index": idx, "reason": "ogiltigt belopp", "cells": str_cells})

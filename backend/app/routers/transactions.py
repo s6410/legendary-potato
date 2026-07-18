@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..db.models import Account, CategorizationRule, Category, Transaction, TransactionLink
 from ..deps import get_db
 from ..services import rules as rules_service
+from ..services.categories import category_path
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -113,14 +114,6 @@ def list_transactions(
     accounts = {a.id: a.name for a in db.scalars(select(Account))}
     links = _link_map(db, [t.id for t in txns])
 
-    def cat_path(cid: int | None) -> str | None:
-        if cid is None or cid not in cats:
-            return None
-        c = cats[cid]
-        if c.parent_id and c.parent_id in cats:
-            return f"{cats[c.parent_id].name} › {c.name}"
-        return c.name
-
     return {
         "total": total,
         "total_amount_ore": total_amount,
@@ -136,7 +129,7 @@ def list_transactions(
                 "account_id": t.account_id,
                 "account_name": accounts.get(t.account_id),
                 "category_id": t.category_id,
-                "category_path": cat_path(t.category_id),
+                "category_path": category_path(cats, t.category_id),
                 "category_source": t.category_source,
                 "is_excluded": bool(t.is_excluded),
                 "note": t.note,

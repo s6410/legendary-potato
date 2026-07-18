@@ -10,19 +10,18 @@ from ..db.models import Account, CategorizationRule, Category, Transaction
 from ..db.models import now_iso
 from ..deps import get_db
 from ..services import rules as rules_service
+from ..services.categories import category_path
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
 
 def _dict(r: CategorizationRule, cats: dict, accounts: dict) -> dict:
-    cat = cats.get(r.category_id)
-    parent = cats.get(cat.parent_id) if cat and cat.parent_id else None
     return {
         "id": r.id,
         "match_type": r.match_type,
         "pattern": r.pattern,
         "category_id": r.category_id,
-        "category_path": (f"{parent.name} › {cat.name}" if parent else cat.name) if cat else None,
+        "category_path": category_path(cats, r.category_id),
         "account_id": r.account_id,
         "account_name": accounts.get(r.account_id),
         "priority": r.priority,
@@ -113,15 +112,22 @@ def update_rule(rule_id: int, body: RulePatch, db: Session = Depends(get_db)) ->
 
     affected = 0
     if body.propagate:
-        # rättelsepropagering: alla transaktioner som denna regel satt får nya värden
+        # rättelsepropagering: transaktioner som denna regel satt omprövas mot det
+        # (eventuellt ändrade) mönstret — träffar följer med, övriga släpps fria
         for txn in db.scalars(
             select(Transaction).where(
                 Transaction.applied_rule_id == rule.id,
                 Transaction.category_source == "rule",
             )
         ):
-            if txn.category_id != rule.category_id:
-                txn.category_id = rule.category_id
+            if rules_service.match_rule([rule], txn.description_norm, txn.account_id):
+                if txn.category_id != rule.category_id:
+                    txn.category_id = rule.category_id
+                    affected += 1
+            else:
+                txn.category_id = None
+                txn.category_source = None
+                txn.applied_rule_id = None
                 affected += 1
         affected += rules_service.apply_single_rule(db, rule)
     return {"ok": True, "affected": affected}

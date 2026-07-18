@@ -5,7 +5,7 @@ import { api, useApiMutation, useBudgets, useForecast } from '../api/hooks'
 import { CategoryPicker } from '../components/CategoryPicker'
 import { Modal } from '../components/Modal'
 import { PeriodPicker } from '../components/PeriodPicker'
-import { currentMonth, formatOre } from '../lib/format'
+import { currentMonth, formatOre, parseKr } from '../lib/format'
 
 export function BudgetPage() {
   const [month, setMonth] = useState(currentMonth())
@@ -137,12 +137,13 @@ function AddBudgetDialog({ month, onClose }: { month: string; onClose: () => voi
     () =>
       api.send('POST', '/budgets', {
         category_id: categoryId,
-        amount_ore: Math.round(parseFloat(amount.replace(',', '.')) * 100),
+        amount_ore: parseKr(amount),
         valid_from: month,
       }),
     onClose,
   )
-  const valid = categoryId != null && parseFloat(amount.replace(',', '.')) > 0
+  const parsed = parseKr(amount)
+  const valid = categoryId != null && parsed != null && parsed > 0
   return (
     <Modal title="Ny budgetpost" onClose={onClose}>
       <div className="flex flex-col gap-3 text-sm">

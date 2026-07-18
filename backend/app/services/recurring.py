@@ -13,6 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import Category, RecurringOverride, Transaction
+from .categories import category_path
+from .insights import _noise_category_ids, excluded_txn_ids
 
 CADENCES = [
     ("weekly", 6, 8, "Veckovis"),
@@ -38,6 +40,10 @@ def detect_recurring(db: Session, reference_date: str | None = None) -> list[dic
     }
     cats = {c.id: c for c in db.scalars(select(Category))}
 
+    # samma exkluderingar som övrig statistik: överföringar/exkluderade kategorier
+    # och ben i bekräftade kvittningspar är inte återkommande UTGIFTER
+    noise = _noise_category_ids(db)
+    excluded = excluded_txn_ids(db)
     groups: dict[tuple[str, int], list[Transaction]] = {}
     for t in db.scalars(
         select(Transaction).where(
@@ -46,13 +52,16 @@ def detect_recurring(db: Session, reference_date: str | None = None) -> list[dic
             Transaction.is_excluded == 0,
         )
     ):
+        if t.id in excluded or t.category_id in noise:
+            continue
         groups.setdefault((t.description_norm, t.account_id), []).append(t)
 
     series: list[dict] = []
     for (norm, account_id), txns in groups.items():
         if len(txns) < 3:
             continue
-        if overrides.get((norm, account_id)) == "dismissed":
+        override = overrides.get((norm, account_id)) or overrides.get((norm, None))
+        if override == "dismissed":
             continue
         txns.sort(key=lambda t: t.booked_date)
         dates = [date.fromisoformat(t.booked_date) for t in txns]
@@ -86,8 +95,6 @@ def detect_recurring(db: Session, reference_date: str | None = None) -> list[dic
         last = dates[-1]
         next_expected = last + timedelta(days=round(med_gap))
         possibly_ended = (ref - last).days > med_gap * 1.5
-        cat = cats.get(txns[-1].category_id)
-        parent = cats.get(cat.parent_id) if cat and cat.parent_id else None
 
         series.append(
             {
@@ -104,10 +111,8 @@ def detect_recurring(db: Session, reference_date: str | None = None) -> list[dic
                 "next_expected_date": next_expected.isoformat(),
                 "possibly_ended": possibly_ended,
                 "category_id": txns[-1].category_id,
-                "category_path": (
-                    f"{parent.name} › {cat.name}" if parent else (cat.name if cat else None)
-                ),
-                "confirmed": overrides.get((norm, account_id)) == "confirmed",
+                "category_path": category_path(cats, txns[-1].category_id),
+                "confirmed": override == "confirmed",
             }
         )
     series.sort(key=lambda s: -s["annual_cost_ore"])

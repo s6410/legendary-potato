@@ -12,7 +12,7 @@ import {
 import type { DriftClass, SavingsAccount } from '../api/types'
 import { EChart } from '../components/EChart'
 import { Modal } from '../components/Modal'
-import { formatDate, formatOre } from '../lib/format'
+import { formatDate, formatOre, parseKr } from '../lib/format'
 import { chartTokens, useTheme } from '../lib/theme'
 
 const CLASS_OPTIONS = [
@@ -264,10 +264,10 @@ function SnapshotDialog({ accounts, onClose }: { accounts: SavingsAccount[]; onC
       api.send('POST', '/savings/snapshots', {
         snapshot_date: date,
         values: accounts
-          .filter((a) => values[a.id]?.trim())
+          .filter((a) => parseKr(values[a.id] ?? '') != null)
           .map((a) => ({
             savings_account_id: a.id,
-            value_ore: Math.round(parseFloat(values[a.id].replace(/\s/g, '').replace(',', '.')) * 100),
+            value_ore: parseKr(values[a.id])!,
           })),
       }),
     onClose,

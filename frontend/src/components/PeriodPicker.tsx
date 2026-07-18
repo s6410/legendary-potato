@@ -1,4 +1,4 @@
-import { formatMonth, shiftMonth } from '../lib/format'
+import { currentMonth, formatMonth, shiftMonth } from '../lib/format'
 
 interface Props {
   month: string
@@ -8,7 +8,7 @@ interface Props {
 
 /** Månadsväljare med pilar och "idag"-genväg. */
 export function PeriodPicker({ month, onChange, className = '' }: Props) {
-  const now = new Date().toISOString().slice(0, 7)
+  const now = currentMonth()
   return (
     <div className={`flex items-center gap-1 ${className}`}>
       <button

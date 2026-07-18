@@ -24,15 +24,14 @@ def month_range(month: str) -> tuple[str, str]:
     return start.isoformat(), (end - timedelta(days=1)).isoformat()
 
 
-def prev_month(month: str) -> str:
-    y, m = int(month[:4]), int(month[5:7])
-    return f"{y - 1}-12" if m == 1 else f"{y}-{m - 1:02d}"
-
-
 def shift_month(month: str, delta: int) -> str:
     y, m = int(month[:4]), int(month[5:7])
     total = y * 12 + (m - 1) + delta
     return f"{total // 12}-{total % 12 + 1:02d}"
+
+
+def prev_month(month: str) -> str:
+    return shift_month(month, -1)
 
 
 def excluded_txn_ids(db: Session, include_refunds: bool = False) -> set[int]:
@@ -58,9 +57,11 @@ def _analysis_rows(
     date_to: str,
     include_refunds: bool = False,
     account_id: int | None = None,
+    _excluded: set[int] | None = None,
+    _noise: set[int] | None = None,
 ) -> list[Transaction]:
-    excluded = excluded_txn_ids(db, include_refunds)
-    noise = _noise_category_ids(db)
+    excluded = _excluded if _excluded is not None else excluded_txn_ids(db, include_refunds)
+    noise = _noise if _noise is not None else _noise_category_ids(db)
     stmt = select(Transaction).where(
         Transaction.booked_date >= date_from,
         Transaction.booked_date <= date_to,
@@ -153,11 +154,14 @@ def trend(
         )
         cat_filter = {category_id} | children
 
+    # beräkna exkluderingsseten en gång i stället för en gång per månad
+    excluded = excluded_txn_ids(db, include_refunds)
+    noise = _noise_category_ids(db)
     out = []
     for i in range(months - 1, -1, -1):
         month = shift_month(newest, -i)
         f, t = month_range(month)
-        rows = _analysis_rows(db, f, t, include_refunds)
+        rows = _analysis_rows(db, f, t, include_refunds, _excluded=excluded, _noise=noise)
         if cat_filter is not None:
             rows = [r for r in rows if r.category_id in cat_filter]
         out.append({"month": month, **_sums(rows)})
@@ -198,7 +202,12 @@ def forecast(db: Session, months_ahead: int = 3, history_months: int = 6) -> dic
         select(Transaction.booked_date).order_by(Transaction.booked_date.desc()).limit(1)
     )
     if not newest:
-        return {"months": [], "categories": []}
+        return {
+            "based_on_months": [],
+            "months": [],
+            "categories": [],
+            "projected_total_monthly_ore": 0,
+        }
     last_full = shift_month(newest[:7], -1)
 
     history: dict[int | None, list[int]] = {}
@@ -259,6 +268,8 @@ def budget_status(db: Session, month: str, include_refunds: bool = False) -> lis
         if parent in spent and cid not in latest:
             spent[parent] += txn.amount_ore
 
+    from .categories import category_path
+
     out = []
     for cid, b in latest.items():
         cat = cats.get(cid)
@@ -270,7 +281,7 @@ def budget_status(db: Session, month: str, include_refunds: bool = False) -> lis
             {
                 "budget_id": b.id,
                 "category_id": cid,
-                "category_path": f"{parent.name} › {cat.name}" if parent else cat.name,
+                "category_path": category_path(cats, cid),
                 "color": (parent or cat).color,
                 "budget_ore": b.amount_ore,
                 "spent_ore": used,

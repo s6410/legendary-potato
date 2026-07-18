@@ -32,6 +32,7 @@ export function OverviewPage() {
   useEffect(() => {
     const latest = anyTxns?.rows[0]?.booked_date.slice(0, 7)
     if (!touched.current && latest && latest < currentMonth()) {
+      touched.current = true // hoppa max en gång — ryck inte tillbaka användaren vid refetch
       setMonth(latest)
     }
   }, [anyTxns])
@@ -177,6 +178,7 @@ export function OverviewPage() {
               click: (p: ECElementEvent) => {
                 const m = trend[p.dataIndex ?? -1]?.month
                 if (m) {
+                  touched.current = true
                   setMonth(m)
                   setDrill(null)
                 }

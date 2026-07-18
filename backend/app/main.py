@@ -52,10 +52,13 @@ def create_app(db_path: str | None = None, serve_frontend: bool = True) -> FastA
     if serve_frontend and FRONTEND_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
+        dist_root = FRONTEND_DIST.resolve()
+
         @app.get("/{path:path}", include_in_schema=False)
         def spa_fallback(path: str) -> FileResponse:
-            candidate = FRONTEND_DIST / path
-            if path and candidate.is_file():
+            candidate = (FRONTEND_DIST / path).resolve()
+            # containment-koll: '..'-segment får inte läsa filer utanför dist/
+            if path and candidate.is_file() and candidate.is_relative_to(dist_root):
                 return FileResponse(candidate)
             return FileResponse(FRONTEND_DIST / "index.html")
 

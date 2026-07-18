@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..db.models import Account, Category, Transaction
+from ..db.models import Account, Category
 from ..deps import get_db
 from ..services import insights as svc
 from ..services import recurring as recurring_svc
+from ..services.categories import category_path
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -21,9 +22,10 @@ def monthly(month: str, db: Session = Depends(get_db)) -> dict:
     prev = svc.prev_month(month)
     pf, pt = svc.month_range(prev)
 
-    excluded = svc.excluded_txn_ids(db)
     cats = {c.id: c for c in db.scalars(select(Category))}
     accounts = {a.id: a.name for a in db.scalars(select(Account))}
+    # samma filtrering som all annan statistik (inkl. överföringskategorier)
+    analysis_rows = svc._analysis_rows(db, f, t)
     biggest = [
         {
             "id": txn.id,
@@ -31,21 +33,12 @@ def monthly(month: str, db: Session = Depends(get_db)) -> dict:
             "amount_ore": txn.amount_ore,
             "description": txn.description_raw,
             "account_name": accounts.get(txn.account_id),
-            "category_path": _cat_path(cats, txn.category_id),
+            "category_path": category_path(cats, txn.category_id),
         }
-        for txn in db.scalars(
-            select(Transaction)
-            .where(
-                Transaction.booked_date >= f,
-                Transaction.booked_date <= t,
-                Transaction.amount_ore < 0,
-                Transaction.is_excluded == 0,
-            )
-            .order_by(Transaction.amount_ore)
-            .limit(15)
-        )
-        if txn.id not in excluded
-    ][:10]
+        for txn in sorted(
+            (r for r in analysis_rows if r.amount_ore < 0), key=lambda r: r.amount_ore
+        )[:10]
+    ]
 
     recurring = recurring_svc.detect_recurring(db)
     upcoming = [
@@ -64,12 +57,3 @@ def monthly(month: str, db: Session = Depends(get_db)) -> dict:
         "upcoming_recurring": upcoming,
         "trend": svc.trend(db, 12),
     }
-
-
-def _cat_path(cats: dict, cid: int | None) -> str | None:
-    if cid is None or cid not in cats:
-        return None
-    c = cats[cid]
-    if c.parent_id and c.parent_id in cats:
-        return f"{cats[c.parent_id].name} › {c.name}"
-    return c.name

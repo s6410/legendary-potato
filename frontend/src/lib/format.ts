@@ -43,7 +43,18 @@ export function formatDate(iso: string): string {
 }
 
 export function currentMonth(): string {
-  return new Date().toISOString().slice(0, 7)
+  // lokal tid — toISOString() är UTC och ger fel månad strax efter midnatt den 1:a
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** Tolka svensk kronor-inmatning ("6 000", "1 234,50") → ören, eller null vid ogiltig. */
+export function parseKr(input: string): number | null {
+  const s = input.replace(/[\s ]/g, '').replace(',', '.')
+  if (!s) return null
+  const v = Number(s)
+  if (!Number.isFinite(v)) return null
+  return Math.round(v * 100)
 }
 
 export function shiftMonth(month: string, delta: number): string {

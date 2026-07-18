@@ -7,6 +7,7 @@ import json
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..db.models import Account, Category, ImportBatch, ImportFormatProfile, Transaction
@@ -153,7 +154,12 @@ def _prepare(db: Session, data: bytes, filename: str, profile_id: int, account_i
     if not acct_id or not db.get(Account, acct_id):
         raise HTTPException(422, "Ange ett giltigt konto för importen")
     opts = ParseOptions.from_profile(profile)
-    result = parse_with_options(data, filename, opts)
+    try:
+        result = parse_with_options(data, filename, opts)
+    except HTTPException:
+        raise
+    except Exception as e:  # trasig/oläsbar fil ska ge 422, inte 500
+        raise HTTPException(422, f"Kunde inte tolka filen: {e}")
     hashed = assign_hashes(acct_id, result.rows)
     mark_duplicates(db, acct_id, hashed)
     rules = rules_service.load_rules(db)
@@ -248,7 +254,11 @@ async def commit(
         )
         if m:
             m.hit_count += 1
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # två samtidiga commits av överlappande filer — den andra förlorar
+        raise HTTPException(409, "Importen kolliderade med en annan pågående import — försök igen")
     suggested_links = links_service.suggest_refunds(db, acct_id)
     return {
         "batch_id": batch.id,
@@ -291,7 +301,24 @@ def revert_batch(batch_id: int, db: Session = Depends(get_db)) -> dict:
         db.scalars(select(Transaction.id).where(Transaction.batch_id == batch_id))
     )
     if txn_ids:
-        from ..db.models import TransactionLink
+        from collections import Counter
+
+        from ..db.models import CategorizationRule, TransactionLink
+
+        # regelträffar från batchen ska inte räknas efter att raderna försvunnit
+        rule_hits = Counter(
+            rid
+            for rid in db.scalars(
+                select(Transaction.applied_rule_id).where(
+                    Transaction.batch_id == batch_id,
+                    Transaction.applied_rule_id.isnot(None),
+                )
+            )
+        )
+        for rule_id, hits in rule_hits.items():
+            rule = db.get(CategorizationRule, rule_id)
+            if rule:
+                rule.hit_count = max(0, rule.hit_count - hits)
 
         db.query(TransactionLink).filter(
             TransactionLink.txn_a_id.in_(txn_ids) | TransactionLink.txn_b_id.in_(txn_ids)

@@ -27,15 +27,23 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (getThemePref() === 'system') setTheme('system')
 })
 
+function subscribe(cb: () => void) {
+  listeners.add(cb)
+  return () => listeners.delete(cb)
+}
+
+// snapshotten måste ändra värde även när bara det UPPLÖSTA läget ändras
+// (pref='system' + OS-byte), annars bailar React och diagrammen behåller
+// gamla färger
+function snapshot(): string {
+  const pref = getThemePref()
+  return `${pref}:${resolved(pref)}`
+}
+
 export function useTheme(): { pref: Theme; mode: 'light' | 'dark' } {
-  const pref = useSyncExternalStore(
-    (cb) => {
-      listeners.add(cb)
-      return () => listeners.delete(cb)
-    },
-    getThemePref,
-  )
-  return { pref, mode: resolved(pref) }
+  const snap = useSyncExternalStore(subscribe, snapshot)
+  const [pref, mode] = snap.split(':') as [Theme, 'light' | 'dark']
+  return { pref, mode }
 }
 
 /** Läs aktuella CSS-variabler för diagram (ECharts kan inte läsa var()). */

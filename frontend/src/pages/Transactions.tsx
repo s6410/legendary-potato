@@ -69,6 +69,7 @@ export function TransactionsPage() {
         <input
           type="search"
           placeholder="Sök beskrivning …"
+          key={params.get('q') ?? ''}
           defaultValue={params.get('q') ?? ''}
           onKeyDown={(e) => {
             if (e.key === 'Enter') setFilter('q', (e.target as HTMLInputElement).value || null)

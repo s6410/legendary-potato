@@ -23,17 +23,20 @@ def _txn_dict(t: Transaction, accounts: dict) -> dict:
     }
 
 
-@router.get("/suggestions")
-def suggestions(db: Session = Depends(get_db)) -> list[dict]:
+def _links_with_txns(db: Session, status: str, order_by) -> list[dict]:
     accounts = {a.id: a.name for a in db.scalars(select(Account))}
+    links = list(
+        db.scalars(
+            select(TransactionLink).where(TransactionLink.status == status).order_by(order_by)
+        )
+    )
+    txn_ids = {l.txn_a_id for l in links} | {l.txn_b_id for l in links}
+    txns = {
+        t.id: t for t in db.scalars(select(Transaction).where(Transaction.id.in_(txn_ids)))
+    }
     out = []
-    for link in db.scalars(
-        select(TransactionLink)
-        .where(TransactionLink.status == "suggested")
-        .order_by(TransactionLink.score.desc())
-    ):
-        a = db.get(Transaction, link.txn_a_id)
-        b = db.get(Transaction, link.txn_b_id)
+    for link in links:
+        a, b = txns.get(link.txn_a_id), txns.get(link.txn_b_id)
         if not a or not b:
             continue
         out.append(
@@ -48,24 +51,14 @@ def suggestions(db: Session = Depends(get_db)) -> list[dict]:
     return out
 
 
+@router.get("/suggestions")
+def suggestions(db: Session = Depends(get_db)) -> list[dict]:
+    return _links_with_txns(db, "suggested", TransactionLink.score.desc())
+
+
 @router.get("/confirmed")
 def confirmed(db: Session = Depends(get_db)) -> list[dict]:
-    accounts = {a.id: a.name for a in db.scalars(select(Account))}
-    out = []
-    for link in db.scalars(
-        select(TransactionLink).where(TransactionLink.status == "confirmed").order_by(TransactionLink.id.desc())
-    ):
-        a = db.get(Transaction, link.txn_a_id)
-        b = db.get(Transaction, link.txn_b_id)
-        if not a or not b:
-            continue
-        out.append(
-            {
-                "id": link.id, "kind": link.kind, "score": link.score,
-                "txn_a": _txn_dict(a, accounts), "txn_b": _txn_dict(b, accounts),
-            }
-        )
-    return out
+    return _links_with_txns(db, "confirmed", TransactionLink.id.desc())
 
 
 @router.post("/{link_id}/confirm")
@@ -110,15 +103,30 @@ def create_manual(body: ManualLink, db: Session = Depends(get_db)) -> dict:
     b = db.get(Transaction, body.txn_b_id)
     if not a or not b or a.id == b.id:
         raise HTTPException(422, "Ogiltiga transaktioner")
-    existing = db.scalar(
+    confirmed_elsewhere = db.scalar(
         select(TransactionLink).where(
             TransactionLink.txn_a_id.in_([a.id, b.id])
             | TransactionLink.txn_b_id.in_([a.id, b.id]),
             TransactionLink.status == "confirmed",
         )
     )
-    if existing:
+    if confirmed_elsewhere:
         raise HTTPException(409, "En av transaktionerna är redan länkad")
+    # samma par kan redan finnas som förslag/avfärdat — återanvänd raden i stället
+    # för att krocka med UNIQUE(txn_a_id, txn_b_id)
+    existing_pair = db.scalar(
+        select(TransactionLink).where(
+            (
+                (TransactionLink.txn_a_id == a.id) & (TransactionLink.txn_b_id == b.id)
+            )
+            | ((TransactionLink.txn_a_id == b.id) & (TransactionLink.txn_b_id == a.id))
+        )
+    )
+    if existing_pair:
+        existing_pair.kind = body.kind
+        existing_pair.status = "confirmed"
+        db.flush()
+        return {"id": existing_pair.id}
     link = TransactionLink(kind=body.kind, txn_a_id=a.id, txn_b_id=b.id, status="confirmed")
     db.add(link)
     db.flush()
