@@ -52,33 +52,54 @@ class TestDepositCount:
         assert deposit_count(date(2027, 12, 31), date(2028, 2, 29)) == 3
 
 
-class TestUpsertPlan:
-    def test_start_value_from_latest_snapshot(self, db):
+class TestInvestedAt:
+    def test_baseline_is_snapshot_value_at_start(self, db):
         a = _mk_account(db)
         _mk_snapshot(db, a.id, "2026-06-30", 10_000_000)
-        plan = upsert_plan(db, a.id, 500_000, "2026-07-01")
-        assert plan.start_value_ore == 10_000_000
+        upsert_plan(db, a.id, 500_000, "2026-07-01")
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert invested_at(db, a.id, rows, date(2026, 7, 1)) == 10_000_000 + 500_000
 
-    def test_start_value_sums_holdings(self, db):
+    def test_baseline_sums_holdings(self, db):
         isk = _mk_account(db)
         fond_a = _mk_account(db, "Fond A", parent_id=isk.id, target_pct=82)
         fond_b = _mk_account(db, "Fond B", parent_id=isk.id, target_pct=18)
         _mk_snapshot(db, fond_a.id, "2026-06-30", 4_100_000)
         _mk_snapshot(db, fond_b.id, "2026-06-30", 900_000)
-        plan = upsert_plan(db, isk.id, 500_000, "2026-07-01")
-        assert plan.start_value_ore == 5_000_000
+        upsert_plan(db, isk.id, 500_000, "2026-07-01")
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert invested_at(db, isk.id, rows, date(2026, 7, 1)) == 5_000_000 + 500_000
 
-    def test_start_value_zero_without_snapshots(self, db):
+    def test_baseline_zero_without_snapshots(self, db):
         a = _mk_account(db)
-        plan = upsert_plan(db, a.id, 500_000, "2026-07-01")
-        assert plan.start_value_ore == 0
+        upsert_plan(db, a.id, 500_000, "2026-07-01")
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert invested_at(db, a.id, rows, date(2026, 7, 1)) == 500_000
 
-    def test_snapshots_after_start_are_ignored(self, db):
+    def test_snapshots_after_start_do_not_move_baseline(self, db):
         a = _mk_account(db)
         _mk_snapshot(db, a.id, "2026-06-30", 10_000_000)
         _mk_snapshot(db, a.id, "2026-08-31", 99_000_000)
-        plan = upsert_plan(db, a.id, 500_000, "2026-07-01")
-        assert plan.start_value_ore == 10_000_000
+        upsert_plan(db, a.id, 500_000, "2026-07-01")
+        rows = list(db.scalars(select(SavingsPlan)))
+        # baslinjen är värdet vid planstart — senare uppgångar är avkastning
+        assert invested_at(db, a.id, rows, date(2026, 9, 1)) == 10_000_000 + 3 * 500_000
+
+    def test_snapshot_added_after_plan_creation_counts(self, db):
+        # regression: startkapitalet beräknas live, inte vid skapandet — värden
+        # som matas in i efterhand (daterade före planstarten) ska räknas med
+        a = _mk_account(db)
+        upsert_plan(db, a.id, 500_000, "2026-07-01")
+        _mk_snapshot(db, a.id, "2026-06-30", 10_000_000)
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert invested_at(db, a.id, rows, date(2026, 7, 1)) == 10_000_000 + 500_000
+
+    def test_none_before_first_start(self, db):
+        a = _mk_account(db)
+        _mk_snapshot(db, a.id, "2026-06-30", 10_000_000)
+        upsert_plan(db, a.id, 500_000, "2026-07-01")
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert invested_at(db, a.id, rows, date(2026, 6, 30)) is None
 
     def test_invested_accumulates_monthly(self, db):
         a = _mk_account(db)
@@ -86,20 +107,19 @@ class TestUpsertPlan:
         upsert_plan(db, a.id, 500_000, "2026-07-01")
         rows = list(db.scalars(select(SavingsPlan)))
         # insättningar 1 jul, 1 aug, 1 sep = 3 st
-        assert invested_at(rows, date(2026, 9, 1)) == 10_000_000 + 3 * 500_000
-        assert invested_at(rows, date(2026, 6, 30)) is None
+        assert invested_at(db, a.id, rows, date(2026, 9, 1)) == 10_000_000 + 3 * 500_000
 
+
+class TestUpsertPlan:
     def test_amount_change_chains_rows(self, db):
         a = _mk_account(db)
         upsert_plan(db, a.id, 500_000, "2026-01-15")
         upsert_plan(db, a.id, 600_000, "2026-04-01")
         rows = list(db.scalars(select(SavingsPlan)))
         old = next(r for r in rows if r.monthly_amount_ore == 500_000)
-        new = next(r for r in rows if r.monthly_amount_ore == 600_000)
         assert old.end_date == "2026-03-31"
-        # insatt vid bytet: 3 insättningar (15 jan, 15 feb, 15 mar)
-        assert new.start_value_ore == 3 * 500_000
-        assert invested_at(rows, date(2026, 4, 1)) == 3 * 500_000 + 600_000
+        # 3 insättningar à 5 000 (15 jan–15 mar) + 1 à 6 000 (1 apr)
+        assert invested_at(db, a.id, rows, date(2026, 4, 1)) == 3 * 500_000 + 600_000
 
     def test_same_day_replace_removes_old_row(self, db):
         a = _mk_account(db)
@@ -109,7 +129,19 @@ class TestUpsertPlan:
         rows = list(db.scalars(select(SavingsPlan)))
         assert len(rows) == 1
         assert rows[0].monthly_amount_ore == 700_000
-        assert rows[0].start_value_ore == 10_000_000
+        assert invested_at(db, a.id, rows, date(2026, 7, 1)) == 10_000_000 + 700_000
+
+    def test_same_month_replace_resets_instead_of_chaining(self, db):
+        # regression: plan skapad 18 juli och direkt ändrad till start 29 juli
+        # ska INTE lämna kvar en fantomrad med en insättning den 18:e
+        a = _mk_account(db)
+        _mk_snapshot(db, a.id, "2026-07-18", 384_000_000)
+        upsert_plan(db, a.id, 500_000, "2026-07-18")
+        upsert_plan(db, a.id, 500_000, "2026-07-29")
+        rows = list(db.scalars(select(SavingsPlan)))
+        assert len(rows) == 1
+        assert rows[0].start_date == "2026-07-29"
+        assert invested_at(db, a.id, rows, date(2026, 7, 18)) is None
 
     def test_end_active_plan(self, db):
         a = _mk_account(db)
@@ -118,7 +150,9 @@ class TestUpsertPlan:
         rows = list(db.scalars(select(SavingsPlan)))
         assert rows[0].end_date == "2026-07-18"
         # insatt kapital fryses efter avslut
-        assert invested_at(rows, date(2026, 12, 1)) == invested_at(rows, date(2026, 7, 18))
+        assert invested_at(db, a.id, rows, date(2026, 12, 1)) == invested_at(
+            db, a.id, rows, date(2026, 7, 18)
+        )
         assert end_active_plan(db, a.id, date(2026, 7, 19)) is False
 
 
@@ -190,6 +224,18 @@ class TestPlanSummary:
         assert acct["return_ore"] == 300_000
         assert acct["return_pct"] == round(300_000 / 11_500_000, 4)
         assert s["total"]["monthly_amount_ore"] == 500_000
+
+    def test_future_start_counts_current_value_as_invested(self, db):
+        # regression: plan som startar senare i månaden ska inte visa hela
+        # dagens värde som avkastning — startkapitalet är dagens värde
+        a = _mk_account(db)
+        _mk_snapshot(db, a.id, "2026-07-18", 384_000_000)
+        upsert_plan(db, a.id, 500_000, "2026-07-29")
+        s = plan_summary(db, [7.0], None, date(2026, 7, 18))
+        acct = s["accounts"][0]
+        assert acct["invested_ore"] == 384_000_000
+        assert acct["return_ore"] == 0
+        assert acct["return_pct"] == 0.0
 
     def test_empty_without_active_plan(self, db):
         s = plan_summary(db, [7.0], None, date(2026, 3, 15))

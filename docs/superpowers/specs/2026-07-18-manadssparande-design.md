@@ -17,6 +17,17 @@ prognoser och månatliga köpförslag — utan manuell loggning av varje insätt
 - **Dynamiska prognosvärden**: scenarioprocent och eget målbelopp är
   användarinställningar, inte hårdkodade konstanter.
 
+> **Revidering 2026-07-18 (efter driftsättning):** startkapitalet lagras inte
+> längre i `start_value_ore` (kolumnen finns kvar men används inte). Insatt
+> kapital beräknas live: kontots värde vid *första* planradens start (ur
+> snapshots vid läsning) + alla antagna insättningar över raderna. Det rättar
+> två buggar: (1) plan skapad/ändrad innan värden matats in fick startkapital 0
+> och visade hela kontovärdet som avkastning; (2) plan med framtida startdatum
+> visade avkastning i stället för 0 — nu räknas dagens värde som startkapital
+> tills planen startar. Dessutom: en omsparad plan vars gamla rad startade i
+> samma kalendermånad ersätter raden helt (rättning) i stället för att kedjas
+> (beloppsbyte).
+
 ## Datamodell
 
 Ny tabell `savings_plans`:

@@ -2,8 +2,12 @@
 
 En plan per toppnivåkonto. Insättningar antas ske samma månadsdag som
 startdatumet (dag 29–31 klampas till månadens sista dag). Vid beloppsändring
-kedjas planrader: den gamla avslutas och den nya börjar med ackumulerat
-insatt kapital i start_value_ore — så förblir historiken korrekt.
+kedjas planrader: den gamla avslutas dagen före den nyas start.
+
+Insatt kapital beräknas alltid live: kontots värde vid första planstarten
+(startkapitalet, hämtat ur snapshots vid läsning) plus alla antagna
+insättningar. Inget frusets vid skapandet — värden som matas in i efterhand
+räknas därmed med, och kolumnen start_value_ore används inte längre.
 """
 from __future__ import annotations
 
@@ -27,19 +31,20 @@ def deposit_count(start: date, as_of: date) -> int:
     return months + 1
 
 
-def _row_invested(plan: SavingsPlan, as_of: date) -> int:
-    start = date.fromisoformat(plan.start_date)
-    effective = min(as_of, date.fromisoformat(plan.end_date)) if plan.end_date else as_of
-    return plan.start_value_ore + deposit_count(start, effective) * plan.monthly_amount_ore
-
-
-def invested_at(rows: list[SavingsPlan], as_of: date) -> int | None:
-    """Insatt kapital enligt (ev. kedjade) planrader; None före första radens start."""
-    started = [r for r in rows if date.fromisoformat(r.start_date) <= as_of]
-    if not started:
+def invested_at(db: Session, account_id: int, rows: list[SavingsPlan], as_of: date) -> int | None:
+    """Insatt kapital: kontots värde vid första planstarten + alla antagna
+    insättningar t.o.m. as_of. None före första radens start."""
+    if not rows:
         return None
-    latest = max(started, key=lambda r: (r.start_date, r.id))
-    return _row_invested(latest, as_of)
+    first_start = min(date.fromisoformat(r.start_date) for r in rows)
+    if as_of < first_start:
+        return None
+    total = account_value_at(db, account_id, first_start.isoformat())
+    for row in rows:
+        row_start = date.fromisoformat(row.start_date)
+        effective = min(as_of, date.fromisoformat(row.end_date)) if row.end_date else as_of
+        total += deposit_count(row_start, effective) * row.monthly_amount_ore
+    return total
 
 
 def account_value_at(db: Session, account_id: int, as_of: str) -> int:
@@ -63,28 +68,28 @@ def account_value_at(db: Session, account_id: int, as_of: str) -> int:
 
 
 def upsert_plan(db: Session, account_id: int, monthly_amount_ore: int, start_date: str) -> SavingsPlan:
-    """Skapa eller ersätt aktiv plan. Kedjar rader så insatt kapital förblir korrekt."""
+    """Skapa eller ersätt aktiv plan.
+
+    Rader som startar på/efter nya startdatumet — eller i samma kalendermånad —
+    betraktas som felinmatningar och ersätts helt. Äldre rader avslutas dagen
+    före den nya starten (beloppsbyte med bevarad insättningshistorik).
+    """
     start = date.fromisoformat(start_date)
     rows = list(
         db.scalars(select(SavingsPlan).where(SavingsPlan.savings_account_id == account_id))
     )
-    # rader som startar på/efter nya startdatumet ersätts helt
-    for row in [r for r in rows if r.start_date >= start_date]:
+    month = start_date[:7]
+    for row in [r for r in rows if r.start_date >= start_date or r.start_date[:7] == month]:
         db.delete(row)
         rows.remove(row)
     day_before = (start - timedelta(days=1)).isoformat()
-    prev_invested = invested_at(rows, start - timedelta(days=1))
     for row in rows:
         if row.end_date is None or row.end_date > day_before:
             row.end_date = day_before
-    start_value = (
-        prev_invested if prev_invested is not None else account_value_at(db, account_id, start_date)
-    )
     plan = SavingsPlan(
         savings_account_id=account_id,
         monthly_amount_ore=monthly_amount_ore,
         start_date=start_date,
-        start_value_ore=start_value,
     )
     db.add(plan)
     db.flush()
@@ -143,7 +148,10 @@ def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: d
         if not active:
             continue
         account = db.get(SavingsAccount, account_id)
-        invested = invested_at(rows, today) or 0
+        invested = invested_at(db, account_id, rows, today)
+        if invested is None:
+            # planen startar i framtiden — dagens värde är startkapitalet
+            invested = account_value_at(db, account_id, active.start_date)
         value = account_value_at(db, account_id, today.isoformat())
         accounts_out.append(
             {
@@ -216,7 +224,9 @@ def invested_series(db: Session, dates: list[str]) -> list[int | None]:
     out: list[int | None] = []
     for d in dates:
         as_of = date.fromisoformat(d)
-        values = [invested_at(rows, as_of) for rows in by_account.values()]
+        values = [
+            invested_at(db, account_id, rows, as_of) for account_id, rows in by_account.items()
+        ]
         known = [v for v in values if v is not None]
         out.append(sum(known) if known else None)
     return out
