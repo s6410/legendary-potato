@@ -58,7 +58,8 @@ för egen placering.
 1. Exportera transaktioner från din internetbank (CSV eller Excel).
 2. Släpp filen på **Importera**-sidan.
 3. Okänt format? Guiden visar filens kolumner med exempelrader — peka ut datum, beskrivning
-   och belopp, välj konto. Valen sparas.
+   och belopp, välj konto. Gissar guiden fel rad för tabellens rubriker kan du flytta den
+   manuellt. Valen sparas.
 4. Granska förhandsvisningen (nya/dubbletter/auto-kategoriserade) och bekräfta.
 5. Kategorisera transaktionerna och kryssa i "Skapa regel" — nästa import sköter sig själv.
 

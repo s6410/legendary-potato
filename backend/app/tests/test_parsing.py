@@ -65,6 +65,46 @@ def test_preamble_generic_split_columns_and_dotted_dates():
     assert r.suggested_thousands_separator == " "
 
 
+def test_handelsbanken_konto_xlsx_header_after_metadata():
+    r = inspect_file(load("handelsbanken_konto.xlsx"), "handelsbanken_konto.xlsx")
+    assert r.header_row_index == 8
+    m = r.suggested_mapping
+    assert m["date"] == 1 and m["description"] == 2 and m["amount"] == 3 and m["balance"] == 4
+    assert not r.suggested_invert_sign
+
+
+def test_handelsbanken_platinum_header_after_invoice_block():
+    # Fakturainfo-blocket (rad 8–9) innehåller en datum+belopp-rad och får
+    # inte misstas för tabellheadern — riktiga headern är rad 11 (index 10)
+    r = inspect_file(load("handelsbanken_platinum.xlsx"), "handelsbanken_platinum.xlsx")
+    assert r.header_row_index == 10
+    m = r.suggested_mapping
+    assert m["date"] == 0 and m["description"] == 1 and m["amount"] == 2
+    assert not r.suggested_invert_sign  # köpen är redan negativa
+
+
+def test_parse_handelsbanken_platinum_excludes_invoice_total():
+    res = parse_with_options(
+        load("handelsbanken_platinum.xlsx"),
+        "handelsbanken_platinum.xlsx",
+        _opts_from_inspection("handelsbanken_platinum.xlsx"),
+    )
+    assert [r.amount_ore for r in res.rows] == [-19363, -3900, -69000, -12950]
+    # fakturans totalbelopp (-62 691,42) ska inte finnas bland raderna
+    assert all(r.amount_ore != -6269142 for r in res.rows)
+    assert res.rows[0].description_raw == "ICA NARA LJUNGSKOGEN"
+
+
+def test_inspect_with_manual_header_row_override():
+    data = load("handelsbanken_platinum.xlsx")
+    auto = inspect_file(data, "handelsbanken_platinum.xlsx")
+    forced = inspect_file(data, "handelsbanken_platinum.xlsx", header_row_index=7)
+    assert forced.header_row_index == 7
+    assert forced.header[0] == "Faktura information"
+    # mappning och fingeravtryck ska räknas om utifrån den valda raden
+    assert forced.fingerprint != auto.fingerprint
+
+
 def test_fingerprint_stable_and_distinct():
     a1 = inspect_file(load("swedbank.csv"), "swedbank.csv").fingerprint
     a2 = inspect_file(load("swedbank.csv"), "swedbank.csv").fingerprint

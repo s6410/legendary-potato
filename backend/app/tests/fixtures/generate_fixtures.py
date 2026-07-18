@@ -134,6 +134,57 @@ def handelsbanken_kort() -> None:
     (HERE / "handelsbanken_kort.csv").write_bytes("\n".join(lines).encode("utf-8"))
 
 
+def handelsbanken_konto_xlsx() -> None:
+    # Kontoutdrag: metadatablock med "Saldo: ..." och "Period: ..." före headern på rad 9
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Handelsbanken"])
+    ws.append(["2026-07-17, 23:23"])
+    ws.append([""])
+    ws.append(["Lönekonto "])
+    ws.append([""])
+    ws.append(["Kontoform: Privatkonto", "Clearingnummer: 6821", "Saldo: 43801.37"])
+    ws.append(["Period: 2026-03-01 - 2026-07-17", "Transaktionstyp: Alla"])
+    ws.append([""])
+    ws.append(["Reskontradatum", "Transaktionsdatum", "Text", "Belopp", "Saldo"])
+    rows = [
+        ("2026-07-17", "2026-07-17", "ERIK ENGKVIST", -2050, 43801.37),
+        ("2026-07-16", "2026-07-16", "Betalning", 3000, 45851.37),
+        ("2026-07-13", "2026-07-13", "iFiske", -240, 42851.37),
+    ]
+    for r in rows:
+        ws.append(list(r))
+    wb.save(HERE / "handelsbanken_konto.xlsx")
+
+
+def handelsbanken_platinum_xlsx() -> None:
+    # Kortfaktura: två infoblock (varav ett med datum+belopp-rad!) före
+    # transaktionstabellen på rad 11 — sätter headerdetekteringen på prov
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Handelsbanken"])
+    ws.append(["2026-07-17, 23:06"])
+    ws.append([""])
+    ws.append(["", "", "", "", "", "", ""])
+    ws.append(["Typ", "Avtalsnummer", "Giltigt t.o.m.", "", "", "", ""])
+    ws.append(["Platinum", None, "2030-03", "", "", "", ""])
+    ws.append(["", "", "", "", "", "", ""])
+    ws.append(["Faktura information", "Förfallodag", "Totalbelopp", "OCR", "Bankgiro", "", ""])
+    ws.append(["", "2026-05-29", "-62 691,42", "000114933960857", "5913-2357", "", ""])
+    ws.append(["", "", "", "", "", "", ""])
+    ws.append(["Transaktionsdatum", "Inköpsställe", "Belopp", "Valuta",
+               "Valutakurs", "Utländskt belopp", "Utländsk valuta"])
+    rows = [
+        ("2026-05-14", "ICA NARA LJUNGSKOGEN", -193.63, "SEK", "", "", ""),
+        ("2026-05-14", "JUMP Toftanas", -39, "SEK", "", "", ""),
+        ("2026-05-13", "AmazonMktplc*NR0YR0A", -690, "SEK", "", "", ""),
+        ("2026-05-12", "PAYPAL *STEAM GAMES", -129.5, "SEK", "", "", ""),
+    ]
+    for r in rows:
+        ws.append(list(r))
+    wb.save(HERE / "handelsbanken_platinum.xlsx")
+
+
 def preamble() -> None:
     # Okänt generiskt format: metadata före header, tusentalsavgränsare med hårt mellanslag
     lines = [
@@ -176,6 +227,7 @@ def entercard_pdf() -> None:
 
 if __name__ == "__main__":
     for fn in (swedbank, nordea, seb, entercard, amex, overlaps, duplicate_coffee, preamble,
-               handelsbanken_kort, entercard_pdf):
+               handelsbanken_kort, handelsbanken_konto_xlsx, handelsbanken_platinum_xlsx,
+               entercard_pdf):
         fn()
     print("Fixturer genererade i", HERE)

@@ -282,7 +282,14 @@ def detect_date_format(samples: list) -> str:
 # ----------------------------------------------------------- headerdetektering
 
 def detect_header_row(rows: list[list]) -> int:
-    """Första raden med ≥3 textceller där nästa icke-tomma rad ser ut som data."""
+    """Raden med ≥3 textceller som följs av flest sammanhängande datarader.
+
+    Kortfakturor har ofta ett infoblock (t.ex. förfallodag + totalbelopp) som
+    också ser ut som header + datarad — men bara den riktiga tabellheadern
+    följs av många transaktionsrader, så kandidaterna poängsätts i stället
+    för att första träffen vinner.
+    """
+    best_idx, best_score = 0, 0
     for i, row in enumerate(rows[:15]):
         cells = [_cell_str(c) for c in row]
         texty = [
@@ -291,14 +298,21 @@ def detect_header_row(rows: list[list]) -> int:
         ]
         if len(texty) < 3:
             continue
-        for nxt in rows[i + 1 : i + 4]:
-            nxt_cells = [c for c in nxt if _cell_str(c)]
-            if not nxt_cells:
-                continue
-            if any(looks_like_date(c) for c in nxt) and any(looks_like_amount(c) for c in nxt):
-                return i
-            break
-    return 0
+        score = 0
+        for nxt in rows[i + 1 : i + 40]:
+            if not any(_cell_str(c) for c in nxt):
+                continue  # tomrader mellan block bryter inte sviten
+            has_date = any(looks_like_date(c) for c in nxt)
+            has_amount = any(looks_like_amount(c) for c in nxt)
+            if has_date and has_amount:
+                score += 1
+            elif has_amount:
+                continue  # t.ex. "Reserverat"-rader utan datum bryter inte sviten
+            else:
+                break  # ren textrad — nästa block/tabell börjar
+        if score > best_score:
+            best_idx, best_score = i, score
+    return best_idx
 
 
 # ------------------------------------------------------------- mappningsgissning
@@ -360,9 +374,19 @@ def _claimed(mapping: dict) -> set[int]:
 
 # ------------------------------------------------------------------ inspect
 
-def inspect_file(data: bytes, filename: str) -> InspectionResult:
+def inspect_file(
+    data: bytes, filename: str, header_row_index: int | None = None
+) -> InspectionResult:
+    """Analysera filen. `header_row_index` låter användaren peka ut tabellens
+    headerrad manuellt när autodetekteringen gissar fel — mappning, format
+    och fingeravtryck räknas då om utifrån den raden."""
     file_type, rows, encoding, delimiter = read_raw_rows(data, filename)
-    header_idx = detect_header_row(rows)
+    if header_row_index is not None:
+        if not 0 <= header_row_index < len(rows):
+            raise ValueError(f"headerrad {header_row_index} finns inte i filen")
+        header_idx = header_row_index
+    else:
+        header_idx = detect_header_row(rows)
     header = [_cell_str(c) for c in rows[header_idx]]
     data_rows = [r for r in rows[header_idx + 1 :] if any(_cell_str(c) for c in r)]
     samples = data_rows[:10]

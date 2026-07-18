@@ -40,10 +40,14 @@ def _profile_dict(p: ImportFormatProfile) -> dict:
 
 
 @router.post("/inspect")
-async def inspect(file: UploadFile = File(...), db: Session = Depends(get_db)) -> dict:
+async def inspect(
+    file: UploadFile = File(...),
+    header_row_index: int | None = Form(None),
+    db: Session = Depends(get_db),
+) -> dict:
     data = await file.read()
     try:
-        insp = inspect_file(data, file.filename or "fil.csv")
+        insp = inspect_file(data, file.filename or "fil.csv", header_row_index)
     except Exception as e:  # trasig fil ska ge begripligt fel, inte 500
         raise HTTPException(422, f"Kunde inte läsa filen: {e}")
     profile = db.scalar(

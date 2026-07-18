@@ -24,8 +24,16 @@ const FIELD_LABELS: [string, string][] = [
   ['member', 'Medlem/Ägare'],
 ]
 
+/** Fält i guiden som ska överleva en ominspektion med annan rubrikrad. */
+export interface WizardDraft {
+  name: string
+  accountId: number | ''
+  newAccountName: string
+}
+
 export function ImportPage() {
   const [step, setStep] = useState<Step>({ name: 'idle' })
+  const [draft, setDraft] = useState<WizardDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const invalidate = useInvalidate()
 
@@ -45,6 +53,7 @@ export function ImportPage() {
   const inspect = useCallback(
     async (file: File) => {
       setError(null)
+      setDraft(null)
       setStep({ name: 'inspecting' })
       try {
         const result = await api.sendFile<InspectResult>('/import/inspect', file)
@@ -59,6 +68,24 @@ export function ImportPage() {
       }
     },
     [runPreview],
+  )
+
+  const reinspect = useCallback(
+    async (file: File, current: InspectResult, headerRowIndex: number, keep: WizardDraft) => {
+      setError(null)
+      setDraft(keep)
+      setStep({ name: 'inspecting' })
+      try {
+        const result = await api.sendFile<InspectResult>('/import/inspect', file, {
+          header_row_index: String(headerRowIndex),
+        })
+        setStep({ name: 'wizard', file, result })
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+        setStep({ name: 'wizard', file, result: current })
+      }
+    },
+    [],
   )
 
   async function commit(file: File, profileId: number) {
@@ -103,8 +130,11 @@ export function ImportPage() {
 
       {step.name === 'wizard' && (
         <MappingWizard
+          key={`${step.result.inspection.fingerprint}-${step.result.inspection.header_row_index}`}
           file={step.file}
           result={step.result}
+          draft={draft}
+          onHeaderRowChange={(rowIndex, keep) => reinspect(step.file, step.result, rowIndex, keep)}
           onSaved={(profileId) => runPreview(step.file, profileId)}
           onCancel={() => setStep({ name: 'idle' })}
         />
@@ -199,11 +229,15 @@ function Dropzone({ busy, onFile }: { busy: boolean; onFile: (f: File) => void }
 function MappingWizard({
   file,
   result,
+  draft,
+  onHeaderRowChange,
   onSaved,
   onCancel,
 }: {
   file: File
   result: InspectResult
+  draft: WizardDraft | null
+  onHeaderRowChange: (rowIndex: number, keep: WizardDraft) => void
   onSaved: (profileId: number) => void
   onCancel: () => void
 }) {
@@ -213,11 +247,14 @@ function MappingWizard({
   const [mapping, setMapping] = useState<Record<string, number | null>>(
     known ? result.profile!.column_mapping : insp.suggested_mapping,
   )
-  const [name, setName] = useState(known ? result.profile!.name : suggestName(file.name))
-  const [accountId, setAccountId] = useState<number | ''>(
-    known && result.profile!.default_account_id ? result.profile!.default_account_id : '',
+  const [name, setName] = useState(
+    draft?.name ?? (known ? result.profile!.name : suggestName(file.name)),
   )
-  const [newAccountName, setNewAccountName] = useState('')
+  const [accountId, setAccountId] = useState<number | ''>(
+    draft?.accountId ??
+      (known && result.profile!.default_account_id ? result.profile!.default_account_id : ''),
+  )
+  const [newAccountName, setNewAccountName] = useState(draft?.newAccountName ?? '')
   const [invert, setInvert] = useState(
     known ? result.profile!.invert_sign : insp.suggested_invert_sign,
   )
@@ -278,6 +315,11 @@ function MappingWizard({
           ? 'Formatet känns igen men saknar standardkonto.'
           : 'Jag har gissat mappningen nedan utifrån rubrikerna. Justera vid behov — valen sparas och används automatiskt nästa gång du importerar en fil med samma format.'}
       </p>
+
+      <HeaderRowPicker
+        rowIndex={insp.header_row_index}
+        onChange={(row) => onHeaderRowChange(row, { name, accountId, newAccountName })}
+      />
 
       <div className="mt-4 overflow-x-auto rounded-lg border border-bord">
         <table className="w-full text-sm">
@@ -386,6 +428,66 @@ function MappingWizard({
           {saving ? 'Sparar …' : 'Spara & förhandsgranska'}
         </button>
       </div>
+    </div>
+  )
+}
+
+function HeaderRowPicker({
+  rowIndex,
+  onChange,
+}: {
+  rowIndex: number
+  onChange: (rowIndex: number) => void
+}) {
+  const [value, setValue] = useState(String(rowIndex + 1))
+
+  function apply(raw: string) {
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 1) {
+      setValue(String(rowIndex + 1))
+      return
+    }
+    if (n - 1 !== rowIndex) onChange(n - 1)
+  }
+
+  const stepBtn =
+    'flex h-7 w-7 items-center justify-center rounded-md border border-baseline text-sm hover:bg-grid disabled:opacity-40'
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-bord bg-grid/40 px-4 py-2.5 text-sm">
+      <span className="font-medium">Tabellens rubrikrad:</span>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          aria-label="Flytta rubrikraden uppåt"
+          disabled={rowIndex === 0}
+          onClick={() => onChange(rowIndex - 1)}
+          className={stepBtn}
+        >
+          −
+        </button>
+        <input
+          inputMode="numeric"
+          aria-label="Radnummer i filen för tabellens rubriker"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={(e) => apply(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && apply(e.currentTarget.value)}
+          className="w-14 text-center"
+        />
+        <button
+          type="button"
+          aria-label="Flytta rubrikraden nedåt"
+          onClick={() => onChange(rowIndex + 1)}
+          className={stepBtn}
+        >
+          +
+        </button>
+      </div>
+      <span className="text-ink-2">
+        Allt ovanför denna rad ignoreras och datan börjar på raden efter — justera om kolumnerna
+        nedan ser fel ut.
+      </span>
     </div>
   )
 }

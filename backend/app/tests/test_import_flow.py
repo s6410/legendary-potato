@@ -45,6 +45,23 @@ def _upload(client, endpoint: str, filename: str, profile_id: int):
     )
 
 
+def test_inspect_accepts_manual_header_row(client):
+    data = (FIXTURES / "handelsbanken_platinum.xlsx").read_bytes()
+    auto = client.post(
+        "/api/import/inspect", files={"file": ("handelsbanken_platinum.xlsx", data)}
+    ).json()["inspection"]
+    forced = client.post(
+        "/api/import/inspect",
+        files={"file": ("handelsbanken_platinum.xlsx", data)},
+        data={"header_row_index": "7"},
+    )
+    assert forced.status_code == 200, forced.text
+    insp = forced.json()["inspection"]
+    assert insp["header_row_index"] == 7
+    assert insp["header"][0] == "Faktura information"
+    assert insp["fingerprint"] != auto["fingerprint"]
+
+
 def test_full_flow_inspect_profile_preview_commit(client):
     acct = _make_account(client)
     profile_id = _make_profile_from_inspect(client, "swedbank.csv", acct)
