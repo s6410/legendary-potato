@@ -218,7 +218,7 @@ def drift(db: Session = Depends(get_db)) -> dict:
                 "current_pct": round(current_pct, 2),
                 "target_pct": target_pct,
                 "drift_pct": round(current_pct - target_pct, 2) if target_pct is not None else None,
-                "drift_ore": int(value - total * target_pct / 100) if target_pct is not None else None,
+                "drift_ore": round(value - total * target_pct / 100) if target_pct is not None else None,
             }
         )
     return {"total_ore": total, "classes": classes}
