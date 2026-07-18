@@ -250,3 +250,41 @@ class TestPlanSummaryApi:
 
     def test_goal_validation(self, client):
         assert client.get("/api/savings/plan-summary?goal_ore=-5").status_code == 422
+
+
+class TestHistoryInvested:
+    def test_invested_series_in_history(self, client):
+        isk = _create_account(client, "ISK")
+        client.post("/api/savings/snapshots", json={
+            "snapshot_date": "2026-06-30",
+            "values": [{"savings_account_id": isk, "value_ore": 1_000_000}],
+        })
+        client.put(
+            f"/api/savings/accounts/{isk}/plan",
+            json={"monthly_amount_ore": 500_000, "start_date": "2026-07-15"},
+        )
+        client.post("/api/savings/snapshots", json={
+            "snapshot_date": "2026-08-31",
+            "values": [{"savings_account_id": isk, "value_ore": 2_100_000}],
+        })
+        h = client.get("/api/savings/history").json()
+        assert h["dates"] == ["2026-06-30", "2026-08-31"]
+        # före planstart: null; efter: startkapital 1 000 000 + 2 insättningar (15 jul, 15 aug)
+        assert h["invested"] == [None, 1_000_000 + 2 * 500_000]
+
+    def test_invested_all_null_without_plans(self, client):
+        isk = _create_account(client, "ISK")
+        client.post("/api/savings/snapshots", json={
+            "snapshot_date": "2026-06-30",
+            "values": [{"savings_account_id": isk, "value_ore": 1_000_000}],
+        })
+        h = client.get("/api/savings/history").json()
+        assert h["invested"] == [None]
+
+
+class TestCascade:
+    def test_deleting_account_deletes_plans(self, client, db):
+        isk = _create_account(client, "ISK")
+        client.put(f"/api/savings/accounts/{isk}/plan", json={"monthly_amount_ore": 500_000})
+        client.delete(f"/api/savings/accounts/{isk}")
+        assert list(db.scalars(select(SavingsPlan))) == []

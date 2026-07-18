@@ -203,3 +203,20 @@ def plan_summary(db: Session, rates: list[float], goal_ore: int | None, today: d
         milestones.append({"amount_ore": amount, "is_goal": is_goal, "reached": reached})
 
     return {"accounts": accounts_out, "total": total, "forecast": forecast, "milestones": milestones}
+
+
+def invested_series(db: Session, dates: list[str]) -> list[int | None]:
+    """Ackumulerat insatt kapital (alla konton med plan) per datum; None före första planstart."""
+    all_rows = list(db.scalars(select(SavingsPlan)))
+    if not all_rows:
+        return [None] * len(dates)
+    by_account: dict[int, list[SavingsPlan]] = {}
+    for row in all_rows:
+        by_account.setdefault(row.savings_account_id, []).append(row)
+    out: list[int | None] = []
+    for d in dates:
+        as_of = date.fromisoformat(d)
+        values = [invested_at(rows, as_of) for rows in by_account.values()]
+        known = [v for v in values if v is not None]
+        out.append(sum(known) if known else None)
+    return out

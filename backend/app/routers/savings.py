@@ -291,7 +291,11 @@ def history(db: Session = Depends(get_db)) -> dict:
                 ],
             }
         )
-    return {"dates": dates, "series": series}
+    return {
+        "dates": dates,
+        "series": series,
+        "invested": savings_plan_service.invested_series(db, dates),
+    }
 
 
 class TargetsIn(BaseModel):
