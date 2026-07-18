@@ -87,6 +87,7 @@ class Transaction(Base):
     occurrence_index: Mapped[int] = mapped_column(default=0)
     is_excluded: Mapped[int] = mapped_column(default=0)
     note: Mapped[str | None]
+    member: Mapped[str | None]
     created_at: Mapped[str] = mapped_column(default=now_iso)
 
 

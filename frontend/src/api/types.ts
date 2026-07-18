@@ -40,6 +40,7 @@ export interface Txn {
   category_source: 'rule' | 'manual' | null
   is_excluded: boolean
   note: string | null
+  member: string | null
   link: TxnLinkInfo | null
 }
 
@@ -266,6 +267,79 @@ export interface Forecast {
   months: string[]
   categories: { category_id: number | null; name: string; projected_monthly_ore: number }[]
   projected_total_monthly_ore: number
+}
+
+export interface Observation {
+  type: string
+  severity: number
+  title: string
+  body: string
+  link: string
+}
+
+export interface CashflowEvent {
+  date: string
+  description: string
+  amount_ore: number
+  kind: 'income' | 'expense'
+}
+
+export interface CashflowForecast {
+  from: string
+  days: number
+  events: CashflowEvent[]
+  daily: { date: string; cumulative_ore: number }[]
+  projected_net_ore: number
+  variable_daily_ore: number
+  savings_total_ore: number
+  monthly_expenses_ore: number
+  buffer_months: number | null
+}
+
+export interface MemberBucket {
+  member: string | null
+  expenses_ore: number
+  income_ore: number
+  transaction_count: number
+}
+
+export interface ByMember {
+  from: string
+  to: string
+  members: MemberBucket[]
+  unassigned: MemberBucket | null
+  settlement: { member: string; paid_ore: number; fair_share_ore: number; diff_ore: number }[]
+}
+
+export interface RebalancePlan {
+  contribution_ore: number
+  allocations: { asset_class: string; label: string; amount_ore: number }[]
+  requires_selling?: boolean
+}
+
+export interface YearlyReport {
+  year: number
+  summary: SummaryNumbers
+  previous_summary: SummaryNumbers
+  months: TrendPoint[]
+  category_changes: {
+    category_id: number | null
+    name: string
+    color: string | null
+    current_ore: number
+    previous_ore: number
+    diff_ore: number
+  }[]
+  biggest_month: TrendPoint | null
+  biggest_month_top_category: CategoryBucket | null
+  top_merchants: Merchant[]
+  subscriptions_active: RecurringSeries[]
+  subscriptions_cancelled: RecurringSeries[]
+  subscriptions_cancelled_savings_ore: number
+  subscriptions_annual_cost_ore: number
+  savings_start_ore: number | null
+  savings_end_ore: number | null
+  avg_savings_rate: number | null
 }
 
 export interface MonthlyReport {

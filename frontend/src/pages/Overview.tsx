@@ -5,7 +5,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   useByCategory,
   useCashflow,
+  useCashflowForecast,
   useLinkSuggestions,
+  useObservations,
   useSummary,
   useTopMerchants,
   useTransactions,
@@ -45,6 +47,8 @@ export function OverviewPage() {
   const { data: cashflow = [] } = useCashflow(12)
   const { data: merchants = [] } = useTopMerchants({ period: month, limit: 8 })
   const { data: suggestions = [] } = useLinkSuggestions()
+  const { data: observations = [] } = useObservations(month)
+  const { data: forecast } = useCashflowForecast(60)
 
   const tokens = useMemo(() => chartTokens(), [mode]) // eslint-disable-line react-hooks/exhaustive-deps
   const monthRange = useMemo(() => {
@@ -97,6 +101,29 @@ export function OverviewPage() {
         >
           ⇄ {suggestions.length} föreslagna återbetalningspar väntar på granskning →
         </Link>
+      )}
+
+      {observations.length > 0 && (
+        <div className="card p-4">
+          <h2 className="mb-2 font-semibold">Insikter</h2>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {observations.map((o, i) => (
+              <Link
+                key={`${o.type}-${i}`}
+                to={o.link}
+                className="flex items-start gap-2.5 rounded-lg border border-bord px-3 py-2.5 text-sm transition-colors hover:bg-grid/50"
+              >
+                <span aria-hidden className="mt-0.5">
+                  {OBS_ICONS[o.type] ?? '💡'}
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-medium">{o.title}</span>
+                  <span className="block text-xs text-ink-2">{o.body}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -214,9 +241,47 @@ export function OverviewPage() {
           <p className="mb-2 text-xs text-muted">Summan av alla månaders netto över tid.</p>
           <EChart height={Math.max(220, 300)} option={cashflowOption(cashflow, tokens)} />
         </div>
+
+        {forecast && forecast.daily.length > 0 && (
+          <div className="card p-4 xl:col-span-2">
+            <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="font-semibold">Prognos: kommande 60 dagar</h2>
+              <span className="text-sm text-ink-2">
+                Förväntat netto:{' '}
+                <strong className={forecast.projected_net_ore >= 0 ? 'text-good' : 'text-bad'}>
+                  {formatSigned(forecast.projected_net_ore)}
+                </strong>
+                {forecast.buffer_months != null && (
+                  <>
+                    {' '}
+                    · sparandet räcker{' '}
+                    <strong>{String(forecast.buffer_months).replace('.', ',')} månader</strong> utan
+                    inkomster
+                  </>
+                )}
+              </span>
+            </div>
+            <p className="mb-2 text-xs text-muted">
+              Baserat på detekterade löner, kända återkommande dragningar och normal rörlig
+              konsumtion ({formatOre(forecast.variable_daily_ore)}/dag).
+            </p>
+            <EChart height={260} option={forecastOption(forecast, tokens)} />
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+const OBS_ICONS: Record<string, string> = {
+  budget_over: '🚨',
+  budget_pace: '⏱',
+  category_spike: '📈',
+  price_hike: '💸',
+  recurring_new: '🆕',
+  recurring_ended: '✂️',
+  savings_drift: '⚖️',
+  uncategorized: '🏷',
 }
 
 function KpiTile({
@@ -391,6 +456,76 @@ function merchantsOption(
       },
     ],
   }
+}
+
+function forecastOption(
+  forecast: NonNullable<ReturnType<typeof useCashflowForecast>['data']>,
+  t: Tokens,
+): EChartsOption {
+  const eventsByDate = new Map<string, string[]>()
+  for (const e of forecast.events) {
+    const list = eventsByDate.get(e.date) ?? []
+    list.push(`${e.kind === 'income' ? '+' : '−'} ${e.description}: ${formatOre(Math.abs(e.amount_ore))}`)
+    eventsByDate.set(e.date, list)
+  }
+  return {
+    grid: { left: 8, right: 8, top: 16, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: t.surface,
+      borderColor: t.grid,
+      textStyle: { color: t.ink, fontSize: 12 },
+      formatter: (params) => {
+        const p = (params as unknown as { axisValue: string; value: number }[])[0]
+        const events = eventsByDate.get(p.axisValue) ?? []
+        return [
+          `<b>${formatDateLabel(p.axisValue)}</b>`,
+          `Ackumulerat: ${formatOre(Number(p.value))}`,
+          ...events,
+        ].join('<br/>')
+      },
+    },
+    xAxis: {
+      type: 'category',
+      data: forecast.daily.map((d) => d.date),
+      axisLine: { lineStyle: { color: t.baseline } },
+      axisTick: { show: false },
+      axisLabel: {
+        color: t.muted,
+        fontSize: 10,
+        formatter: (v: string) => formatDateLabel(v),
+        interval: 6,
+      },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: t.muted, fontSize: 10, formatter: (v: number) => formatOre(v) },
+      splitLine: { lineStyle: { color: t.grid } },
+    },
+    series: [
+      {
+        type: 'line',
+        data: forecast.daily.map((d) => d.cumulative_ore),
+        lineStyle: { color: t.series[6], width: 2, type: 'dashed' },
+        itemStyle: { color: t.series[6] },
+        symbol: 'none',
+        areaStyle: { opacity: 0.08, color: t.series[6] },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { color: t.baseline, type: 'solid' },
+          label: { show: false },
+          data: [{ yAxis: 0 }],
+        },
+      },
+    ],
+  }
+}
+
+function formatDateLabel(iso: string): string {
+  return new Intl.DateTimeFormat('sv-SE', { day: 'numeric', month: 'short' }).format(
+    new Date(`${iso}T12:00:00`),
+  )
 }
 
 function cashflowOption(

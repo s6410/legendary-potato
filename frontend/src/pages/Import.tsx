@@ -21,6 +21,7 @@ const FIELD_LABELS: [string, string][] = [
   ['amount_in', 'Insättning (delad kolumn)'],
   ['amount_out', 'Uttag (delad kolumn)'],
   ['balance', 'Saldo'],
+  ['member', 'Medlem/Ägare'],
 ]
 
 export function ImportPage() {
@@ -178,15 +179,15 @@ function Dropzone({ busy, onFile }: { busy: boolean; onFile: (f: File) => void }
         {busy ? '⏳' : '⇪'}
       </span>
       <span className="text-lg font-medium">
-        {busy ? 'Arbetar …' : 'Släpp en CSV- eller Excel-fil här'}
+        {busy ? 'Arbetar …' : 'Släpp en CSV-, Excel- eller PDF-fil här'}
       </span>
       <span className="text-sm text-ink-2">
-        Exportera från din bank (Swedbank, SEB, Nordea, Handelsbanken, ICA, Avanza, Amex …) och
-        släpp filen här — eller klicka för att välja. Okända format får en guide första gången.
+        Exportera från din bank (Swedbank, SEB, Nordea, Handelsbanken, ICA, Avanza, Amex …) eller
+        släpp en kortfaktura-PDF (Entercard/Amex) direkt. Okända format får en guide första gången.
       </span>
       <input
         type="file"
-        accept=".csv,.xlsx,.xls,.tsv,.txt"
+        accept=".csv,.xlsx,.xls,.tsv,.txt,.pdf"
         className="hidden"
         disabled={busy}
         onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}

@@ -250,6 +250,7 @@ async def commit(
                 applied_rule_id=m.id if m else None,
                 dedup_hash=h.dedup_hash,
                 occurrence_index=h.occurrence_index,
+                member=h.row.member,
             )
         )
         if m:

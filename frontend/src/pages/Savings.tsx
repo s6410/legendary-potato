@@ -5,6 +5,7 @@ import {
   api,
   useApiMutation,
   useDrift,
+  useRebalance,
   useSavingsAccounts,
   useSavingsHistory,
   useTargets,
@@ -12,7 +13,7 @@ import {
 import type { DriftClass, SavingsAccount } from '../api/types'
 import { EChart } from '../components/EChart'
 import { Modal } from '../components/Modal'
-import { formatDate, formatOre, parseKr } from '../lib/format'
+import { formatDate, formatOre, formatSigned, parseKr } from '../lib/format'
 import { chartTokens, useTheme } from '../lib/theme'
 
 const CLASS_OPTIONS = [
@@ -121,6 +122,8 @@ export function SavingsPage() {
             </div>
           </div>
 
+          {drift && drift.total_ore > 0 && <RebalanceCard />}
+
           {history && history.dates.length > 1 && (
             <div className="card mt-5 p-4">
               <h2 className="mb-2 font-semibold">Utveckling över tid</h2>
@@ -205,6 +208,54 @@ function DriftView({ drift, tokens }: { drift: DriftClass[]; tokens: ReturnType<
           </div>
         )
       })}
+    </div>
+  )
+}
+
+function RebalanceCard() {
+  const [amountText, setAmountText] = useState('5000')
+  const contribution = parseKr(amountText) ?? 0
+  const { data: plan } = useRebalance(contribution)
+
+  return (
+    <div className="card mt-5 p-5">
+      <h2 className="font-semibold">Rebalanseringsförslag</h2>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <span>Om jag sätter in</span>
+        <input
+          inputMode="decimal"
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          className="w-28 text-right"
+          aria-label="Månadsspar i kronor"
+        />
+        <span>kr — var gör de mest nytta?</span>
+      </div>
+      {plan && plan.allocations.length > 0 ? (
+        <>
+          <ul className="mt-3 flex flex-col gap-1.5 text-sm">
+            {plan.allocations.map((a) => (
+              <li key={a.asset_class} className="flex justify-between">
+                <span>{a.label}</span>
+                <span className="tabular font-medium">
+                  {plan.requires_selling ? formatSigned(a.amount_ore) : formatOre(a.amount_ore)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-muted">
+            {plan.requires_selling
+              ? 'Utan nysparande krävs omflyttning (positivt = köp, negativt = sälj).'
+              : 'Fördelningen fyller underviktade tillgångsslag först, utan att något behöver säljas.'}
+          </p>
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-muted">
+          {contribution > 0
+            ? 'Fördelningen ligger redan på målet — spara enligt målprocenten.'
+            : 'Ange ett belopp för att få ett fördelningsförslag.'}
+        </p>
+      )}
     </div>
   )
 }

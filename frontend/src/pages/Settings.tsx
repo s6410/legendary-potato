@@ -6,6 +6,60 @@ import type { ImportProfile } from '../api/types'
 import { Modal } from '../components/Modal'
 import { setTheme, useTheme } from '../lib/theme'
 
+function MembersSection() {
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => api.get<Record<string, string | null>>('/settings'),
+  })
+  const members: string[] = (() => {
+    try {
+      return settings?.members ? JSON.parse(settings.members) : []
+    } catch {
+      return []
+    }
+  })()
+  const [newName, setNewName] = useState('')
+  const save = useApiMutation((list: string[]) =>
+    api.send('PUT', '/settings', { members: JSON.stringify(list) }),
+  )
+
+  return (
+    <section className="card p-5">
+      <h2 className="font-semibold">Hushållsmedlemmar</h2>
+      <p className="mt-1 text-xs text-muted">
+        Namn som föreslås när du sätter medlem på transaktioner. Kortexporter med ägarkolumn
+        lägger till namn automatiskt vid import.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {members.map((m) => (
+          <span key={m} className="flex items-center gap-1.5 rounded-full bg-series-7/15 px-3 py-1 text-sm">
+            {m}
+            <button
+              onClick={() => save.mutate(members.filter((x) => x !== m))}
+              className="text-muted hover:text-bad"
+              aria-label={`Ta bort ${m}`}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && newName.trim() && !members.includes(newName.trim())) {
+              save.mutate([...members, newName.trim()])
+              setNewName('')
+            }
+          }}
+          placeholder="+ Lägg till namn (Enter)"
+          className="w-44 text-sm"
+        />
+      </div>
+    </section>
+  )
+}
+
 export function SettingsPage() {
   const { pref } = useTheme()
   const { data: accounts = [] } = useAccounts()
@@ -138,6 +192,8 @@ export function SettingsPage() {
           <p className="mt-2 text-xs text-bad">{(deleteProfile.error as Error).message}</p>
         )}
       </section>
+
+      <MembersSection />
 
       <section className="card p-5">
         <h2 className="font-semibold">Om Kassaboken</h2>

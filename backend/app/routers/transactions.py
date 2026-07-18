@@ -35,6 +35,7 @@ def _apply_filters(
     uncategorized: bool,
     min_amount: int | None,
     max_amount: int | None,
+    member: str | None = None,
 ):
     if date_from:
         stmt = stmt.where(Transaction.booked_date >= date_from)
@@ -59,6 +60,11 @@ def _apply_filters(
         stmt = stmt.where(Transaction.amount_ore >= min_amount)
     if max_amount is not None:
         stmt = stmt.where(Transaction.amount_ore <= max_amount)
+    if member is not None:
+        if member == "__none__":
+            stmt = stmt.where(Transaction.member.is_(None))
+        else:
+            stmt = stmt.where(Transaction.member == member)
     return stmt
 
 
@@ -90,6 +96,7 @@ def list_transactions(
     uncategorized: bool = False,
     min_amount: int | None = None,
     max_amount: int | None = None,
+    member: str | None = None,
     sort: str = "date_desc",
     page: int = 1,
     page_size: int = Query(50, le=500),
@@ -97,7 +104,7 @@ def list_transactions(
 ) -> dict:
     base = _apply_filters(
         select(Transaction), db, date_from, date_to, account_id, category_id,
-        q, uncategorized, min_amount, max_amount,
+        q, uncategorized, min_amount, max_amount, member,
     )
     sub = base.subquery()
     total = db.scalar(select(func.count()).select_from(sub))
@@ -133,6 +140,7 @@ def list_transactions(
                 "category_source": t.category_source,
                 "is_excluded": bool(t.is_excluded),
                 "note": t.note,
+                "member": t.member,
                 "link": links.get(t.id),
             }
             for t in txns
@@ -145,6 +153,8 @@ class TxnPatch(BaseModel):
     clear_category: bool = False
     note: str | None = None
     is_excluded: bool | None = None
+    member: str | None = None
+    clear_member: bool = False
 
 
 @router.patch("/{txn_id}")
@@ -166,7 +176,49 @@ def patch_transaction(txn_id: int, body: TxnPatch, db: Session = Depends(get_db)
         txn.note = body.note or None
     if body.is_excluded is not None:
         txn.is_excluded = int(body.is_excluded)
+    if body.clear_member:
+        txn.member = None
+    elif body.member is not None:
+        txn.member = body.member.strip() or None
     return {"ok": True}
+
+
+class BulkMember(BaseModel):
+    ids: list[int]
+    member: str | None   # None = rensa
+
+
+@router.post("/bulk-member")
+def bulk_member(body: BulkMember, db: Session = Depends(get_db)) -> dict:
+    member = body.member.strip() if body.member else None
+    updated = (
+        db.query(Transaction)
+        .filter(Transaction.id.in_(body.ids))
+        .update({"member": member}, synchronize_session=False)
+    )
+    return {"updated": updated}
+
+
+@router.get("/members")
+def list_members(db: Session = Depends(get_db)) -> list[str]:
+    """Kända medlemsnamn: från inställningen + befintliga transaktioner."""
+    import json
+
+    from ..db.models import Setting
+
+    names: list[str] = []
+    setting = db.get(Setting, "members")
+    if setting and setting.value:
+        try:
+            names = [str(n) for n in json.loads(setting.value)]
+        except ValueError:
+            names = []
+    for (m,) in db.execute(
+        select(Transaction.member).where(Transaction.member.isnot(None)).distinct()
+    ):
+        if m not in names:
+            names.append(m)
+    return names
 
 
 class RuleSpec(BaseModel):

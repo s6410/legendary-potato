@@ -4,6 +4,11 @@ import { get, send, sendFile } from './client'
 import type {
   Account,
   BudgetItem,
+  ByMember,
+  CashflowForecast,
+  Observation,
+  RebalancePlan,
+  YearlyReport,
   Category,
   CategoryBucket,
   Drift,
@@ -102,6 +107,39 @@ export const useMonthlyReport = (month: string) =>
   useQuery({
     queryKey: ['report', month],
     queryFn: () => get<MonthlyReport>('/reports/monthly', { month }),
+  })
+
+export const useObservations = (month: string) =>
+  useQuery({
+    queryKey: ['observations', month],
+    queryFn: () => get<Observation[]>('/insights/observations', { month }),
+  })
+
+export const useCashflowForecast = (days = 60) =>
+  useQuery({
+    queryKey: ['cashflow-forecast', days],
+    queryFn: () => get<CashflowForecast>('/insights/cashflow-forecast', { days }),
+  })
+
+export const useByMember = (params: Record<string, unknown>) =>
+  useQuery({
+    queryKey: ['by-member', params],
+    queryFn: () => get<ByMember>('/insights/by-member', params),
+  })
+
+export const useMembers = () =>
+  useQuery({ queryKey: ['members'], queryFn: () => get<string[]>('/transactions/members') })
+
+export const useRebalance = (contributionOre: number) =>
+  useQuery({
+    queryKey: ['rebalance', contributionOre],
+    queryFn: () => get<RebalancePlan>('/savings/rebalance', { contribution_ore: contributionOre }),
+  })
+
+export const useYearlyReport = (year: number) =>
+  useQuery({
+    queryKey: ['yearly-report', year],
+    queryFn: () => get<YearlyReport>('/reports/yearly', { year }),
   })
 
 // --------------------------------------------------------------- mutationer

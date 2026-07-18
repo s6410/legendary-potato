@@ -105,6 +105,8 @@ def detect_recurring(db: Session, reference_date: str | None = None) -> list[dic
                 "cadence_label": cadence[1],
                 "occurrences": len(txns),
                 "median_amount_ore": int(med_amount),
+                "last_amount_ore": int(abs(txns[-1].amount_ore)),
+                "first_date": dates[0].isoformat(),
                 "variable_amount": variable,
                 "annual_cost_ore": int(med_amount) * _PER_YEAR[cadence[0]],
                 "last_date": last.isoformat(),
